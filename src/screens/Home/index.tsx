@@ -22,14 +22,14 @@ import {
   useMessages,
 } from '@/store/conversation/hook'
 import conversationAction from '@/store/conversation/action'
-import conversationState from '@/store/conversation/state'
 import chatAction from '@/store/chat/action'
-import { useStreaming } from '@/store/chat/hook'
+import { useStreaming, useStreamingMessageId } from '@/store/chat/hook'
 import { useModels } from '@/store/model/hook'
 import settingAction from '@/store/setting/action'
 import { useSettingValue } from '@/store/setting/hook'
 import { navigations } from '@/navigation'
 import { toast } from '@/utils/toast'
+import MarkdownContent from '@/components/chat/MarkdownContent'
 
 type Props = {
   componentId: string
@@ -41,6 +41,7 @@ const Home = ({ componentId }: Props) => {
   const activeId = useActiveConversationId()
   const messages = useMessages(activeId)
   const streaming = useStreaming()
+  const streamingMessageId = useStreamingMessageId()
   const { models } = useModels()
   const defaultModel = useSettingValue('api.defaultModel')
   const apiUrl = useSettingValue('api.baseUrl')
@@ -65,7 +66,6 @@ const Home = ({ componentId }: Props) => {
   const currentModel = active?.model || defaultModel || '未选择模型'
   const needSetup = !apiUrl || !apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
-
   const colors = theme.colors
 
   const handleNewChat = useCallback(async () => {
@@ -247,15 +247,12 @@ const Home = ({ componentId }: Props) => {
           ? colors.userBubble
           : colors.assistantBubble
       const textColor = isUser || isError ? colors.textInverse : colors.text
-      const isStreamingThis =
-        streaming && item.id === conversationState.messages[activeId || '']?.slice(-1)[0]?.id
+      // 仅当前正在流式写入的那一条用纯文本；结束后立刻 Markdown
+      const isStreamingThis = streaming && item.id === streamingMessageId
 
       return (
         <View
-          style={[
-            styles.bubbleWrap,
-            isUser ? styles.bubbleRight : styles.bubbleLeft,
-          ]}
+          style={[styles.bubbleWrap, isUser ? styles.bubbleRight : styles.bubbleLeft]}
         >
           <Pressable onLongPress={() => handleMessageLongPress(item)}>
             <View
@@ -268,10 +265,35 @@ const Home = ({ componentId }: Props) => {
                 },
               ]}
             >
-              <Text style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}>
-                {item.content || (isStreamingThis ? '…' : '')}
-                {!item.content && streaming ? '正在思考…' : ''}
-              </Text>
+              {!item.content ? (
+                <Text
+                  style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
+                >
+                  {isStreamingThis ? '正在思考…' : ''}
+                </Text>
+              ) : isUser || isError ? (
+                <Text
+                  style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
+                  selectable
+                >
+                  {item.content}
+                </Text>
+              ) : isStreamingThis ? (
+                // 仅流式中的助手气泡用纯文本，避免半截 Markdown
+                <Text
+                  style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
+                  selectable
+                >
+                  {item.content}
+                </Text>
+              ) : (
+                <MarkdownContent
+                  key={`md-${item.id}`}
+                  content={item.content}
+                  fontSize={fontSize}
+                  textColor={textColor}
+                />
+              )}
             </View>
           </Pressable>
           {showRegenActions ? (
@@ -281,7 +303,9 @@ const Home = ({ componentId }: Props) => {
                   onPress={() => handleCopy(item.content)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={[styles.msgActionText, { color: colors.textSecondary }]}>复制</Text>
+                  <Text style={[styles.msgActionText, { color: colors.textSecondary }]}>
+                    复制
+                  </Text>
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity
@@ -302,7 +326,7 @@ const Home = ({ componentId }: Props) => {
       handleMessageLongPress,
       handleRegenerate,
       streaming,
-      activeId,
+      streamingMessageId,
       lastMessageId,
       canRegenerate,
     ]
@@ -316,8 +340,12 @@ const Home = ({ componentId }: Props) => {
         translucent
       />
 
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.surface, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity style={styles.headerBtn} onPress={() => setDrawerOpen(true)}>
           <Text style={[styles.headerBtnText, { color: colors.primary }]}>菜单</Text>
         </TouchableOpacity>
@@ -347,25 +375,26 @@ const Home = ({ componentId }: Props) => {
         </View>
       ) : null}
 
-      {/* Messages */}
       <FlatList
         ref={listRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
+        data={Array.isArray(messages) ? messages : []}
+        keyExtractor={(item, index) => item?.id || `msg_${index}`}
         renderItem={renderMessage}
         contentContainerStyle={styles.listContent}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={() => {
+          // 流式中减少滚动动画，降低卡顿/闪退风险
+          listRef.current?.scrollToEnd({ animated: !streaming })
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>开始对话</Text>
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              配置中转站后，选择模型即可聊天。长按消息可复制；助手回复可重新生成。
+              配置中转站后，选择模型即可聊天。助手回复支持 Markdown；长按可复制，可重新生成。
             </Text>
           </View>
         }
       />
 
-      {/* Composer */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
@@ -433,8 +462,12 @@ const Home = ({ componentId }: Props) => {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Drawer */}
-      <Modal visible={drawerOpen} animationType="fade" transparent onRequestClose={() => setDrawerOpen(false)}>
+      <Modal
+        visible={drawerOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setDrawerOpen(false)}
+      >
         <Pressable style={styles.modalMask} onPress={() => setDrawerOpen(false)}>
           <Pressable
             style={[styles.drawer, { backgroundColor: colors.surface }]}
@@ -477,6 +510,7 @@ const Home = ({ componentId }: Props) => {
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
                     {item.model || '默认模型'}
+                    {item.systemPrompt?.trim() ? ' · 自定义提示词' : ''}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -488,7 +522,6 @@ const Home = ({ componentId }: Props) => {
         </Pressable>
       </Modal>
 
-      {/* Model picker */}
       <Modal
         visible={modelPickerOpen}
         animationType="slide"
@@ -526,7 +559,6 @@ const Home = ({ componentId }: Props) => {
         </Pressable>
       </Modal>
 
-      {/* Rename dialog */}
       <Modal
         visible={!!renameTarget}
         transparent
@@ -667,7 +699,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   msgActionText: { fontSize: 13, fontWeight: '600' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 32 },
+  empty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+    paddingHorizontal: 32,
+  },
   emptyTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
   emptyDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
   composer: {
@@ -708,11 +746,27 @@ const styles = StyleSheet.create({
   },
   sendText: { color: '#fff', fontWeight: '700' },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
-  drawer: { width: '78%', maxWidth: 320, height: '100%', paddingTop: 48, paddingHorizontal: 12 },
+  drawer: {
+    width: '78%',
+    maxWidth: 320,
+    height: '100%',
+    paddingTop: 48,
+    paddingHorizontal: 12,
+  },
   drawerTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  newChatBtn: { borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginBottom: 12 },
+  newChatBtn: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   newChatText: { color: '#fff', fontWeight: '700' },
-  convItem: { paddingVertical: 12, paddingHorizontal: 10, borderRadius: 8, marginBottom: 4 },
+  convItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
   sheet: {
     marginTop: 'auto',
     width: '100%',
