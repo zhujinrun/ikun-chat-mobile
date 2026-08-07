@@ -25,9 +25,15 @@ export const useActiveConversationId = () => {
   return id
 }
 
+const safeMessageList = (conversationId: string | null): LX.ChatMessage[] => {
+  if (!conversationId) return []
+  const list = state.messages[conversationId]
+  return Array.isArray(list) ? [...list] : []
+}
+
 export const useMessages = (conversationId: string | null) => {
-  const [messages, setMessages] = useState<LX.ChatMessage[]>(
-    conversationId ? state.messages[conversationId] || [] : []
+  const [messages, setMessages] = useState<LX.ChatMessage[]>(() =>
+    safeMessageList(conversationId)
   )
 
   useEffect(() => {
@@ -35,10 +41,10 @@ export const useMessages = (conversationId: string | null) => {
       setMessages([])
       return
     }
-    setMessages([...(state.messages[conversationId] || [])])
+    setMessages(safeMessageList(conversationId))
     const handler = (id: string) => {
       if (id !== conversationId) return
-      setMessages([...(state.messages[conversationId] || [])])
+      setMessages(safeMessageList(conversationId))
     }
     global.state_event.on('messagesUpdated', handler)
     return () => {

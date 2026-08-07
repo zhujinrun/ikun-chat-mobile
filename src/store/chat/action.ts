@@ -38,9 +38,14 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   state.streaming = true
   state.streamingConversationId = conv.id
   state.streamingMessageId = assistant.id
-  global.state_event.streamingUpdated()
+  try {
+    global.state_event.streamingUpdated()
+  } catch (err) {
+    console.error('[chat] streamingUpdated failed', err)
+  }
 
   let full = ''
+  let failedMessage: string | null = null
   try {
     const messages = buildApiMessages(conv.id)
     // 去掉刚插入的空 assistant，避免重复
@@ -53,15 +58,18 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       apiMessages,
       {
         onDelta: (delta) => {
-          full += delta
-          void conversationAction.updateMessageContent(conv.id, assistant.id, full)
+          if (typeof delta === 'string') full += delta
+          else full += String(delta ?? '')
+          // 流式过程只更新内存 + 节流 UI，避免每个 token 写盘/狂刷 setState
+          void conversationAction.updateMessageContent(conv.id, assistant.id, full, false)
         },
         onDone: () => {
           if (!full) {
             void conversationAction.updateMessageContent(
               conv.id,
               assistant.id,
-              '（模型未返回内容）'
+              '（模型未返回内容）',
+              false
             )
           }
         },
@@ -71,32 +79,51 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   } catch (err: any) {
     if (controller.signal.aborted) {
       if (!full) {
-        await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）')
+        await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）', false)
       }
     } else {
       const msg = err?.message || '请求失败'
+      failedMessage = msg
       if (full) {
         await conversationAction.updateMessageContent(
           conv.id,
           assistant.id,
-          `${full}\n\n[错误] ${msg}`
+          `${full}\n\n[错误] ${msg}`,
+          false
         )
       } else {
-        await conversationAction.updateMessageContent(conv.id, assistant.id, '')
-        await conversationAction.addMessage({
-          conversationId: conv.id,
-          role: 'error',
-          content: msg,
-        })
+        await conversationAction.updateMessageContent(conv.id, assistant.id, '', false)
+        try {
+          await conversationAction.addMessage({
+            conversationId: conv.id,
+            role: 'error',
+            content: msg,
+          })
+        } catch (addErr) {
+          console.error('[chat] add error message failed', addErr)
+        }
       }
-      throw err
     }
   } finally {
+    try {
+      await conversationAction.flushMessages(conv.id)
+    } catch (err) {
+      console.error('[chat] flushMessages failed', err)
+    }
     state.streaming = false
     state.streamingConversationId = null
     state.streamingMessageId = null
     state.abortController = null
-    global.state_event.streamingUpdated()
+    try {
+      global.state_event.streamingUpdated()
+    } catch (err) {
+      console.error('[chat] streamingUpdated failed', err)
+    }
+  }
+
+  // 错误已写入会话，再抛给 UI 做 toast；不再让未处理 Promise 直接打崩
+  if (failedMessage) {
+    throw new Error(failedMessage)
   }
 }
 

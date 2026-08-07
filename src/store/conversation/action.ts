@@ -5,45 +5,163 @@ import settingState from '@/store/setting/state'
 import state from './state'
 
 const persistConversations = async () => {
-  await saveData(storageDataPrefix.conversations, {
-    list: state.conversations,
-    activeId: state.activeId,
-  })
+  try {
+    await saveData(storageDataPrefix.conversations, {
+      list: state.conversations,
+      activeId: state.activeId,
+    })
+  } catch (err) {
+    console.error('[conversation.persistConversations] failed', err)
+  }
 }
 
-const persistMessages = async (conversationId: string) => {
-  await saveData(
-    `${storageDataPrefix.messages}${conversationId}`,
-    state.messages[conversationId] || []
-  )
+const writeMessagesToStorage = async (conversationId: string) => {
+  try {
+    await saveData(
+      `${storageDataPrefix.messages}${conversationId}`,
+      state.messages[conversationId] || []
+    )
+  } catch (err) {
+    console.error('[conversation.writeMessages] failed', conversationId, err)
+  }
+}
+
+/** 流式输出时节流 UI 通知，避免每个 token setState 打崩 RN */
+const pendingMessageEmitIds = new Set<string>()
+let messageEmitTimer: ReturnType<typeof setTimeout> | null = null
+
+const emitMessagesUpdatedNow = (conversationId: string) => {
+  try {
+    global.state_event.messagesUpdated(conversationId)
+  } catch (err) {
+    console.error('[conversation.messagesUpdated] emit failed', err)
+  }
+}
+
+const scheduleMessagesUpdated = (conversationId: string) => {
+  pendingMessageEmitIds.add(conversationId)
+  if (messageEmitTimer != null) return
+  messageEmitTimer = setTimeout(() => {
+    messageEmitTimer = null
+    const ids = [...pendingMessageEmitIds]
+    pendingMessageEmitIds.clear()
+    for (const id of ids) emitMessagesUpdatedNow(id)
+  }, 64)
+}
+
+const flushScheduledMessagesUpdated = (conversationId?: string) => {
+  if (messageEmitTimer != null) {
+    clearTimeout(messageEmitTimer)
+    messageEmitTimer = null
+  }
+  if (conversationId) {
+    pendingMessageEmitIds.delete(conversationId)
+    emitMessagesUpdatedNow(conversationId)
+    return
+  }
+  const ids = [...pendingMessageEmitIds]
+  pendingMessageEmitIds.clear()
+  for (const id of ids) emitMessagesUpdatedNow(id)
 }
 
 const sortConversations = () => {
-  state.conversations.sort((a, b) => b.updatedAt - a.updatedAt)
+  state.conversations.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** 消毒会话列表，避免脏数据导致启动崩溃 */
+const sanitizeConversations = (raw: unknown): LX.Conversation[] => {
+  if (!Array.isArray(raw)) return []
+  const list: LX.Conversation[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const id = typeof item.id === 'string' ? item.id : ''
+    if (!id) continue
+    list.push({
+      id,
+      title: typeof item.title === 'string' && item.title ? item.title : '新对话',
+      model: typeof item.model === 'string' ? item.model : '',
+      systemPrompt: typeof item.systemPrompt === 'string' ? item.systemPrompt : undefined,
+      createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+    })
+  }
+  return list
+}
+
+/** 消毒消息列表 */
+const sanitizeMessages = (raw: unknown, conversationId: string): LX.ChatMessage[] => {
+  if (!Array.isArray(raw)) return []
+  const list: LX.ChatMessage[] = []
+  const validRoles = new Set(['system', 'user', 'assistant', 'error'])
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const id = typeof item.id === 'string' ? item.id : createId('m_')
+    const role = typeof item.role === 'string' && validRoles.has(item.role)
+      ? (item.role as LX.ChatRole)
+      : 'assistant'
+    list.push({
+      id,
+      conversationId:
+        typeof item.conversationId === 'string' ? item.conversationId : conversationId,
+      role,
+      content: typeof item.content === 'string' ? item.content : String(item.content ?? ''),
+      createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+    })
+  }
+  return list
 }
 
 export default {
   async load() {
-    const data = await getData<{ list: LX.Conversation[]; activeId: string | null }>(
-      storageDataPrefix.conversations
-    )
-    state.conversations = data?.list || []
-    state.activeId = data?.activeId || state.conversations[0]?.id || null
-    sortConversations()
+    try {
+      const data = await getData<{ list: LX.Conversation[]; activeId: string | null }>(
+        storageDataPrefix.conversations
+      )
+      const list = sanitizeConversations(data?.list)
+      state.conversations = list
+      const activeFromStore = typeof data?.activeId === 'string' ? data.activeId : null
+      state.activeId =
+        (activeFromStore && list.some((c) => c.id === activeFromStore) && activeFromStore) ||
+        list[0]?.id ||
+        null
+      sortConversations()
 
-    if (state.activeId) {
-      await this.loadMessages(state.activeId)
+      if (state.activeId) {
+        await this.loadMessages(state.activeId)
+      }
+    } catch (err) {
+      console.error('[conversation.load] failed, reset local chat data', err)
+      state.conversations = []
+      state.activeId = null
+      state.messages = {}
+      try {
+        await removeData(storageDataPrefix.conversations)
+      } catch {
+        // ignore
+      }
     }
     global.state_event.conversationsUpdated()
+    global.state_event.activeConversationChanged(state.activeId)
   },
 
   async loadMessages(conversationId: string) {
-    if (state.messages[conversationId]) return state.messages[conversationId]
-    const list =
-      (await getData<LX.ChatMessage[]>(`${storageDataPrefix.messages}${conversationId}`)) || []
-    state.messages[conversationId] = list
+    if (!conversationId) return []
+    // 注意：空数组 [] 也是已加载，不能用 truthy 判断
+    if (Object.prototype.hasOwnProperty.call(state.messages, conversationId)) {
+      return state.messages[conversationId]
+    }
+    try {
+      const raw = await getData<unknown>(`${storageDataPrefix.messages}${conversationId}`)
+      state.messages[conversationId] = sanitizeMessages(raw, conversationId)
+    } catch (err) {
+      console.error('[conversation.loadMessages] failed', conversationId, err)
+      state.messages[conversationId] = []
+    }
     global.state_event.messagesUpdated(conversationId)
-    return list
+    return state.messages[conversationId]
   },
 
   async createConversation(title = '新对话', model?: string) {
@@ -59,7 +177,7 @@ export default {
     state.messages[conversation.id] = []
     state.activeId = conversation.id
     await persistConversations()
-    await persistMessages(conversation.id)
+    await writeMessagesToStorage(conversation.id)
     global.state_event.conversationsUpdated()
     global.state_event.activeConversationChanged(conversation.id)
     return conversation
@@ -99,6 +217,10 @@ export default {
     const item = state.conversations.find((c) => c.id === id)
     if (!item) return
     Object.assign(item, patch, { updatedAt: Date.now() })
+    // 显式清除可选字段（JSON 持久化时 undefined 需删掉）
+    if ('systemPrompt' in patch && patch.systemPrompt === undefined) {
+      delete item.systemPrompt
+    }
     sortConversations()
     await persistConversations()
     global.state_event.conversationsUpdated()
@@ -130,20 +252,45 @@ export default {
       await persistConversations()
     }
 
-    await persistMessages(message.conversationId)
+    await writeMessagesToStorage(message.conversationId)
     global.state_event.messagesUpdated(message.conversationId)
     global.state_event.conversationsUpdated()
     return full
   },
 
-  async updateMessageContent(conversationId: string, messageId: string, content: string) {
+  /**
+   * 更新消息内容。
+   * @param persist 是否立刻写盘；流式输出时应传 false，结束时再 flushMessages
+   */
+  async updateMessageContent(
+    conversationId: string,
+    messageId: string,
+    content: string,
+    persist = true
+  ) {
     const list = state.messages[conversationId]
     if (!list) return
     const msg = list.find((m) => m.id === messageId)
     if (!msg) return
-    msg.content = content
-    await persistMessages(conversationId)
-    global.state_event.messagesUpdated(conversationId)
+    msg.content = typeof content === 'string' ? content : String(content ?? '')
+    if (persist) {
+      // 落盘前先把节流队列刷出去，保证 UI 与磁盘一致
+      flushScheduledMessagesUpdated(conversationId)
+      await writeMessagesToStorage(conversationId)
+    } else {
+      scheduleMessagesUpdated(conversationId)
+    }
+  },
+
+  /** 将某会话消息立刻持久化（流式结束后调用） */
+  async flushMessages(conversationId: string) {
+    if (!conversationId) return
+    try {
+      flushScheduledMessagesUpdated(conversationId)
+      await writeMessagesToStorage(conversationId)
+    } catch (err) {
+      console.error('[conversation.flushMessages] failed', conversationId, err)
+    }
   },
 
   /** 保留 [0, keepUntilIndex]（含），删除之后的消息 */
@@ -157,13 +304,13 @@ export default {
     } else {
       return
     }
-    await persistMessages(conversationId)
+    await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
   },
 
   async clearMessages(conversationId: string) {
     state.messages[conversationId] = []
-    await persistMessages(conversationId)
+    await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
   },
 

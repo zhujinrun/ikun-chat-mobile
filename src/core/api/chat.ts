@@ -21,6 +21,31 @@ const buildBody = (model: string, messages: ApiMessage[], stream: boolean) => {
   return body
 }
 
+/** 兼容 string / multimodal array 等 delta 形态，统一成纯文本 */
+const normalizeContentDelta = (raw: unknown): string => {
+  if (raw == null) return ''
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw)) {
+    return raw
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (part && typeof part === 'object') {
+          const p = part as { text?: string; content?: string }
+          if (typeof p.text === 'string') return p.text
+          if (typeof p.content === 'string') return p.content
+        }
+        return ''
+      })
+      .join('')
+  }
+  if (typeof raw === 'object') {
+    const o = raw as { text?: string; content?: string }
+    if (typeof o.text === 'string') return o.text
+    if (typeof o.content === 'string') return o.content
+  }
+  return ''
+}
+
 /** 非流式对话 */
 export const chatCompletions = async (
   model: string,
@@ -43,14 +68,14 @@ export const chatCompletions = async (
   const data = (await res.json()) as ChatCompletionResponse
   if (data.error?.message) throw new ApiError(data.error.message)
 
-  const content = data.choices?.[0]?.message?.content
-  if (content == null) throw new ApiError('模型返回为空')
+  const content = normalizeContentDelta(data.choices?.[0]?.message?.content)
+  if (!content) throw new ApiError('模型返回为空')
   return content
 }
 
 /**
  * 流式对话。
- * 优先使用 fetch + body 增量读取；若环境不支持则回退到非流式。
+ * 优先使用 fetch + body 增量读取；若环境不支持或中途失败则回退非流式。
  */
 export const chatCompletionsStream = async (
   model: string,
@@ -64,10 +89,27 @@ export const chatCompletionsStream = async (
 
   const useStream = settingState.setting['chat.stream'] !== false
 
+  const emitDone = () => {
+    try {
+      handlers.onDone?.()
+    } catch (err) {
+      console.error('[chat.stream] onDone failed', err)
+    }
+  }
+
+  const emitDelta = (text: string) => {
+    if (!text) return
+    try {
+      handlers.onDelta(text)
+    } catch (err) {
+      console.error('[chat.stream] onDelta failed', err)
+    }
+  }
+
   if (!useStream) {
     const text = await chatCompletions(model, messages, signal)
-    handlers.onDelta(text)
-    handlers.onDone?.()
+    emitDelta(text)
+    emitDone()
     return
   }
 
@@ -92,54 +134,106 @@ export const chatCompletionsStream = async (
   // RN 部分版本 body.getReader 不可用，降级非流式
   const body = res.body as any
   if (!body || typeof body.getReader !== 'function') {
-    // 某些实现会把整段 SSE 当文本返回
-    const text = await res.text()
-    const full = parseSseToText(text)
-    if (full) {
-      handlers.onDelta(full)
-      handlers.onDone?.()
-      return
+    try {
+      const text = await res.text()
+      const full = parseSseToText(text)
+      if (full) {
+        emitDelta(full)
+        emitDone()
+        return
+      }
+    } catch (err) {
+      console.warn('[chat.stream] sse text fallback failed', err)
     }
-    // 再降级：重新非流式请求
     const fallback = await chatCompletions(model, messages, signal)
-    handlers.onDelta(fallback)
-    handlers.onDone?.()
+    emitDelta(fallback)
+    emitDone()
     return
   }
 
   const reader = body.getReader()
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split(/\r?\n/)
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith(':')) continue
-      if (!trimmed.startsWith('data:')) continue
-      const dataStr = trimmed.slice(5).trim()
-      if (dataStr === '[DONE]') {
-        handlers.onDone?.()
-        return
-      }
-      try {
-        const chunk = JSON.parse(dataStr) as ChatCompletionChunk
-        if (chunk.error?.message) throw new ApiError(chunk.error.message)
-        const delta = chunk.choices?.[0]?.delta?.content
-        if (delta) handlers.onDelta(delta)
-      } catch (err: any) {
-        if (err instanceof ApiError) throw err
-        // 忽略无法解析的行
-      }
+  let decoder: { decode: (input?: ArrayBuffer | Uint8Array, options?: { stream?: boolean }) => string }
+  try {
+    decoder = new TextDecoder('utf-8')
+  } catch {
+    // 极少数环境无 TextDecoder
+    decoder = {
+      decode: (input) => {
+        if (!input) return ''
+        const bytes = input instanceof Uint8Array ? input : new Uint8Array(input as ArrayBuffer)
+        let s = ''
+        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i])
+        try {
+          return decodeURIComponent(escape(s))
+        } catch {
+          return s
+        }
+      },
     }
   }
 
-  handlers.onDone?.()
+  let buffer = ''
+  let receivedAny = false
+
+  try {
+    while (true) {
+      let readResult: { done: boolean; value?: Uint8Array }
+      try {
+        readResult = await reader.read()
+      } catch (err: any) {
+        if (signal?.aborted) return
+        console.warn('[chat.stream] reader.read failed, fallback', err?.message || err)
+        if (!receivedAny) {
+          const fallback = await chatCompletions(model, messages, signal)
+          emitDelta(fallback)
+        }
+        emitDone()
+        return
+      }
+
+      const { done, value } = readResult
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith(':')) continue
+        if (!trimmed.startsWith('data:')) continue
+        const dataStr = trimmed.slice(5).trim()
+        if (dataStr === '[DONE]') {
+          emitDone()
+          return
+        }
+        try {
+          const chunk = JSON.parse(dataStr) as ChatCompletionChunk
+          if (chunk.error?.message) throw new ApiError(chunk.error.message)
+          // 部分中转站 delta.content 非 string
+          const delta = normalizeContentDelta(
+            (chunk.choices?.[0] as any)?.delta?.content ??
+              (chunk.choices?.[0] as any)?.message?.content
+          )
+          if (delta) {
+            receivedAny = true
+            emitDelta(delta)
+          }
+        } catch (err: any) {
+          if (err instanceof ApiError) throw err
+          // 忽略无法解析的行
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock?.()
+    } catch {
+      // ignore
+    }
+  }
+
+  emitDone()
 }
 
 const parseSseToText = (raw: string): string => {
@@ -151,7 +245,10 @@ const parseSseToText = (raw: string): string => {
     if (!dataStr || dataStr === '[DONE]') continue
     try {
       const chunk = JSON.parse(dataStr) as ChatCompletionChunk
-      const delta = chunk.choices?.[0]?.delta?.content || chunk.choices?.[0]?.message?.content
+      const delta = normalizeContentDelta(
+        (chunk.choices?.[0] as any)?.delta?.content ??
+          (chunk.choices?.[0] as any)?.message?.content
+      )
       if (delta) out += delta
     } catch {
       // ignore
