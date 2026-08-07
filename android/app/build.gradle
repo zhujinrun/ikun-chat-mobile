@@ -85,10 +85,13 @@ android {
     }
     release {
       minifyEnabled enableProguardInReleaseBuilds
+      // 移除未使用资源，进一步缩小 release 体积
+      shrinkResources enableProguardInReleaseBuilds
       proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
       if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE') || rootProject.file("keystore.properties").exists()) {
         signingConfig signingConfigs.release
       } else {
+        // 无正式签名时回退 debug 签名，便于本地验证体积
         signingConfig signingConfigs.debug
       }
     }
@@ -113,7 +116,8 @@ android {
 
 dependencies {
   implementation("com.facebook.react:react-android")
-  implementation("com.facebook.react:flipper-integration")
+  // Flipper 仅 debug：release 使用 src/release 下的空实现，避免打入 libflipper 等调试库
+  debugImplementation("com.facebook.react:flipper-integration")
 
   if (hermesEnabled.toBoolean()) {
     implementation("com.facebook.react:hermes-android")

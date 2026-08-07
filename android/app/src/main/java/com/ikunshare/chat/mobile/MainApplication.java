@@ -56,6 +56,9 @@ public class MainApplication extends NavigationApplication {
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       DefaultNewArchitectureEntryPoint.load();
     }
-    ReactNativeFlipper.initializeFlipper(this, getReactNativeHost().getReactInstanceManager());
+    // debug：真实 Flipper；release：空实现（见 src/release/.../ReactNativeFlipper.java）
+    if (BuildConfig.DEBUG) {
+      ReactNativeFlipper.initializeFlipper(this, getReactNativeHost().getReactInstanceManager());
+    }
   }
 }
