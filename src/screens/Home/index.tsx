@@ -35,6 +35,11 @@ type Props = {
   componentId: string
 }
 
+type EditTarget = {
+  id: string
+  content: string
+}
+
 const Home = ({ componentId }: Props) => {
   const theme = useTheme()
   const conversations = useConversations()
@@ -56,6 +61,8 @@ const Home = ({ componentId }: Props) => {
   const [renameText, setRenameText] = useState('')
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
+  const [editDraft, setEditDraft] = useState('')
   const listRef = useRef<FlatList>(null)
 
   const active = useMemo(
@@ -67,6 +74,19 @@ const Home = ({ componentId }: Props) => {
   const needSetup = !apiUrl || !apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
   const colors = theme.colors
+
+  const ensureReady = useCallback(() => {
+    if (needSetup) {
+      toast('请先在设置中配置 API URL 和 API Key')
+      void navigations.pushSettingScreen(componentId)
+      return false
+    }
+    return true
+  }, [needSetup, componentId])
+
+  const scrollToEnd = useCallback(() => {
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
+  }, [])
 
   const handleNewChat = useCallback(async () => {
     await conversationAction.createConversation()
@@ -104,20 +124,16 @@ const Home = ({ componentId }: Props) => {
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || streaming) return
-    if (needSetup) {
-      toast('请先在设置中配置 API URL 和 API Key')
-      void navigations.pushSettingScreen(componentId)
-      return
-    }
+    if (!ensureReady()) return
     const text = input
     setInput('')
     try {
       await chatAction.send(text)
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
+      scrollToEnd()
     } catch (err: any) {
       toast(err?.message || '发送失败')
     }
-  }, [input, streaming, needSetup, componentId])
+  }, [input, streaming, ensureReady, scrollToEnd])
 
   const handleStop = useCallback(() => {
     chatAction.stop()
@@ -142,18 +158,25 @@ const Home = ({ componentId }: Props) => {
 
   const handleRegenerate = useCallback(async () => {
     if (streaming) return
-    if (needSetup) {
-      toast('请先在设置中配置 API URL 和 API Key')
-      void navigations.pushSettingScreen(componentId)
-      return
-    }
+    if (!ensureReady()) return
     try {
       await chatAction.regenerate()
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
+      scrollToEnd()
     } catch (err: any) {
       toast(err?.message || '重新生成失败')
     }
-  }, [streaming, needSetup, componentId])
+  }, [streaming, ensureReady, scrollToEnd])
+
+  const handleRetry = useCallback(async () => {
+    if (streaming) return
+    if (!ensureReady()) return
+    try {
+      await chatAction.retry()
+      scrollToEnd()
+    } catch (err: any) {
+      toast(err?.message || '重试失败')
+    }
+  }, [streaming, ensureReady, scrollToEnd])
 
   const canRegenerate = useMemo(() => {
     if (streaming || !messages.length) return false
@@ -176,6 +199,43 @@ const Home = ({ componentId }: Props) => {
   //     },
   //   ])
   // }, [activeId])
+
+  const openEditMessage = useCallback((item: LX.ChatMessage) => {
+    if (item.role !== 'user' || streaming) return
+    const idx = messages.findIndex((m) => m.id === item.id)
+    const hasFollowUps = idx >= 0 && idx < messages.length - 1
+
+    const startEdit = () => {
+      setEditTarget({ id: item.id, content: item.content })
+      setEditDraft(item.content)
+    }
+
+    if (hasFollowUps) {
+      Alert.alert('编辑消息', '将删除此消息之后的所有回复，并以新内容重新发送。', [
+        { text: '取消', style: 'cancel' },
+        { text: '继续编辑', onPress: startEdit },
+      ])
+    } else {
+      startEdit()
+    }
+  }, [messages, streaming])
+
+  const confirmEditResend = useCallback(async () => {
+    if (!editTarget) return
+    const text = editDraft.trim()
+    if (!text) {
+      toast('消息不能为空')
+      return
+    }
+    if (!ensureReady()) return
+    setEditTarget(null)
+    try {
+      await chatAction.resendFrom(editTarget.id, text)
+      scrollToEnd()
+    } catch (err: any) {
+      toast(err?.message || '重新发送失败')
+    }
+  }, [editTarget, editDraft, ensureReady, scrollToEnd])
 
   const openPromptModal = useCallback(async () => {
     let conv = active
@@ -208,6 +268,7 @@ const Home = ({ componentId }: Props) => {
 
   const handleMessageLongPress = useCallback(
     (item: LX.ChatMessage) => {
+      if (streaming) return
       const isLast = item.id === lastMessageId
       const buttons: {
         text: string
@@ -221,7 +282,13 @@ const Home = ({ componentId }: Props) => {
           onPress: () => handleCopy(item.content),
         })
       }
-      if (canRegenerate && isLast) {
+      if (item.role === 'user') {
+        buttons.push({
+          text: '编辑并重发',
+          onPress: () => openEditMessage(item),
+        })
+      }
+      if (canRegenerate && isLast && item.role === 'assistant') {
         buttons.push({
           text: '重新生成',
           onPress: () => {
@@ -229,10 +296,26 @@ const Home = ({ componentId }: Props) => {
           },
         })
       }
+      if (canRegenerate && isLast && item.role === 'error') {
+        buttons.push({
+          text: '重试',
+          onPress: () => {
+            void handleRetry()
+          },
+        })
+      }
       if (buttons.length <= 1) return
       Alert.alert('消息', undefined, buttons)
     },
-    [lastMessageId, canRegenerate, handleCopy, handleRegenerate]
+    [
+      streaming,
+      lastMessageId,
+      canRegenerate,
+      handleCopy,
+      openEditMessage,
+      handleRegenerate,
+      handleRetry,
+    ]
   )
 
   const renderMessage = useCallback(
@@ -240,15 +323,19 @@ const Home = ({ componentId }: Props) => {
       const isUser = item.role === 'user'
       const isError = item.role === 'error'
       const isLast = item.id === lastMessageId
-      const showRegenActions = canRegenerate && isLast && !isUser
+      const isStreamingThis = streaming && item.id === streamingMessageId
+      const showActions = !streaming && (
+        (isUser) ||
+        (isLast && isError && canRegenerate) ||
+        (isLast && item.role === 'assistant' && canRegenerate)
+      )
+
       const bubbleBg = isError
         ? colors.error
         : isUser
           ? colors.userBubble
           : colors.assistantBubble
       const textColor = isUser || isError ? colors.textInverse : colors.text
-      // 仅当前正在流式写入的那一条用纯文本；结束后立刻 Markdown
-      const isStreamingThis = streaming && item.id === streamingMessageId
 
       return (
         <View
@@ -296,8 +383,9 @@ const Home = ({ componentId }: Props) => {
               )}
             </View>
           </Pressable>
-          {showRegenActions ? (
-            <View style={styles.msgActions}>
+
+          {showActions ? (
+            <View style={[styles.msgActions, isUser && styles.msgActionsRight]}>
               {item.content ? (
                 <TouchableOpacity
                   onPress={() => handleCopy(item.content)}
@@ -308,12 +396,30 @@ const Home = ({ componentId }: Props) => {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              <TouchableOpacity
-                onPress={() => void handleRegenerate()}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={[styles.msgActionText, { color: colors.primary }]}>重新生成</Text>
-              </TouchableOpacity>
+              {isUser ? (
+                <TouchableOpacity
+                  onPress={() => openEditMessage(item)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={[styles.msgActionText, { color: colors.primary }]}>编辑</Text>
+                </TouchableOpacity>
+              ) : null}
+              {isLast && item.role === 'assistant' && canRegenerate ? (
+                <TouchableOpacity
+                  onPress={() => void handleRegenerate()}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={[styles.msgActionText, { color: colors.primary }]}>重新生成</Text>
+                </TouchableOpacity>
+              ) : null}
+              {isLast && isError && canRegenerate ? (
+                <TouchableOpacity
+                  onPress={() => void handleRetry()}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={[styles.msgActionText, { color: colors.primary }]}>重试</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -325,6 +431,8 @@ const Home = ({ componentId }: Props) => {
       handleCopy,
       handleMessageLongPress,
       handleRegenerate,
+      handleRetry,
+      openEditMessage,
       streaming,
       streamingMessageId,
       lastMessageId,
@@ -389,7 +497,7 @@ const Home = ({ componentId }: Props) => {
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>开始对话</Text>
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              配置中转站后，选择模型即可聊天。助手回复支持 Markdown；长按可复制，可重新生成。
+              配置中转站后即可聊天。支持 Markdown、编辑重发、重新生成与错误重试。
             </Text>
           </View>
         }
@@ -653,6 +761,51 @@ const Home = ({ componentId }: Props) => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={!!editTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditTarget(null)}
+      >
+        <Pressable style={styles.renameMask} onPress={() => setEditTarget(null)}>
+          <Pressable
+            style={[styles.promptBox, { backgroundColor: colors.surface }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={[styles.drawerTitle, { color: colors.text }]}>编辑并重发</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+              保存后将删除该消息之后的回复，并以新内容重新请求。
+            </Text>
+            <TextInput
+              style={[
+                styles.promptInput,
+                {
+                  backgroundColor: colors.inputBg,
+                  color: colors.text,
+                  borderColor: colors.border,
+                  fontSize,
+                },
+              ]}
+              value={editDraft}
+              onChangeText={setEditDraft}
+              multiline
+              textAlignVertical="top"
+              autoFocus
+              placeholder="输入消息…"
+              placeholderTextColor={colors.textSecondary}
+            />
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16 }}>
+              <TouchableOpacity onPress={() => setEditTarget(null)}>
+                <Text style={{ color: colors.textSecondary }}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => void confirmEditResend()}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>发送</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -694,10 +847,12 @@ const styles = StyleSheet.create({
   msgActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 16,
     marginTop: 6,
     paddingHorizontal: 4,
   },
+  msgActionsRight: { justifyContent: 'flex-end' },
   msgActionText: { fontSize: 13, fontWeight: '600' },
   empty: {
     flex: 1,

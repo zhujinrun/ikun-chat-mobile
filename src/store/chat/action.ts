@@ -127,12 +127,30 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   }
 }
 
-/** 找到最后一条 user 消息下标；其后应是可被重新生成的 assistant/error */
+/** 找到最后一条 user 消息下标 */
 const findLastUserIndex = (list: LX.ChatMessage[]) => {
   for (let i = list.length - 1; i >= 0; i--) {
     if (list[i].role === 'user') return i
   }
   return -1
+}
+
+/** 从某条 user 起重新生成：保留到该 user（含），删后续，再请求 */
+const regenerateFromUserIndex = async (conv: LX.Conversation, userIdx: number) => {
+  const list = conversationAction.getMessages(conv.id)
+  if (userIdx < 0 || userIdx >= list.length || list[userIdx].role !== 'user') {
+    throw new Error('没有可重新生成的消息')
+  }
+
+  await conversationAction.trimMessagesTo(conv.id, userIdx)
+
+  const assistant = await conversationAction.addMessage({
+    conversationId: conv.id,
+    role: 'assistant',
+    content: '',
+  })
+
+  await streamAssistantReply(conv, assistant)
 }
 
 export default {
@@ -191,7 +209,6 @@ export default {
       throw new Error('没有可重新生成的消息')
     }
 
-    // 最后一条必须是 user 之后的回复（assistant / error），或仅剩 user（异常中断）
     const tail = list.slice(lastUserIdx + 1)
     const canRegen =
       tail.length === 0 ||
@@ -200,7 +217,50 @@ export default {
       throw new Error('当前消息无法重新生成')
     }
 
-    await conversationAction.trimMessagesTo(conv.id, lastUserIdx)
+    await regenerateFromUserIndex(conv, lastUserIdx)
+  },
+
+  /**
+   * 错误一键重试：与 regenerate 相同路径（去掉末尾 error/空 assistant 后重请求）。
+   */
+  async retry() {
+    await this.regenerate()
+  },
+
+  /**
+   * 编辑某条用户消息并重发：更新内容，删除其后所有消息，再请求。
+   */
+  async resendFrom(userMessageId: string, content: string) {
+    if (state.streaming) return
+
+    const text = content.trim()
+    if (!text) {
+      throw new Error('消息不能为空')
+    }
+
+    const conv = conversationAction.getActive()
+    if (!conv) {
+      throw new Error('当前没有会话')
+    }
+
+    resolveModel(conv)
+
+    const list = conversationAction.getMessages(conv.id)
+    const idx = list.findIndex((m) => m.id === userMessageId)
+    if (idx < 0 || list[idx].role !== 'user') {
+      throw new Error('只能编辑用户消息')
+    }
+
+    await conversationAction.trimMessagesTo(conv.id, idx)
+    await conversationAction.updateMessageContent(conv.id, userMessageId, text)
+
+    // 若是会话首条用户消息，同步刷新标题
+    const convItem = conversationState.conversations.find((c) => c.id === conv.id)
+    if (convItem && idx === 0) {
+      await conversationAction.updateConversation(conv.id, {
+        title: text.slice(0, 30),
+      })
+    }
 
     const assistant = await conversationAction.addMessage({
       conversationId: conv.id,
@@ -211,7 +271,7 @@ export default {
     await streamAssistantReply(conv, assistant)
   },
 
-  /** 当前会话是否可重新生成（有 user，且未在流式中） */
+  /** 当前会话是否可重新生成 / 重试 */
   canRegenerate(): boolean {
     if (state.streaming) return false
     const conv = conversationAction.getActive()
@@ -224,5 +284,14 @@ export default {
       tail.length === 0 ||
       tail.every((m) => m.role === 'assistant' || m.role === 'error')
     )
+  },
+
+  canEditUser(messageId: string): boolean {
+    if (state.streaming) return false
+    const conv = conversationAction.getActive()
+    if (!conv) return false
+    const list = conversationAction.getMessages(conv.id)
+    const msg = list.find((m) => m.id === messageId)
+    return !!msg && msg.role === 'user'
   },
 }
