@@ -68,6 +68,8 @@ const Home = ({ componentId }: Props) => {
   const [promptDraft, setPromptDraft] = useState('')
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  /** 输入区「+」附件菜单：提示词等次要能力 */
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   const listRef = useRef<FlatList>(null)
 
   const active = useMemo(
@@ -397,13 +399,53 @@ const Home = ({ componentId }: Props) => {
                 isStreamingThis ? (
                   <ThinkingIndicator color={textColor} size={Math.max(16, fontSize)} />
                 ) : null
-              ) : isUser || isError ? (
+              ) : isUser ? (
                 <Text
                   style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
                   selectable
                 >
                   {item.content}
                 </Text>
+              ) : isError ? (
+                <View>
+                  <View style={styles.errorTitleRow}>
+                    <Icon name="warning" size={16} color={textColor} />
+                    <Text
+                      style={{
+                        color: textColor,
+                        fontSize: Math.max(13, fontSize - 1),
+                        fontWeight: '700',
+                        marginLeft: 6,
+                      }}
+                    >
+                      生成失败
+                    </Text>
+                  </View>
+                  {item.content ? (
+                    <Text
+                      style={{
+                        color: textColor,
+                        fontSize: fontSize,
+                        lineHeight: fontSize * 1.5,
+                        marginTop: 6,
+                        opacity: 0.95,
+                      }}
+                      selectable
+                    >
+                      {item.content}
+                    </Text>
+                  ) : null}
+                  {isLast && canRegenerate ? (
+                    <TouchableOpacity
+                      style={styles.errorRetryBtn}
+                      onPress={() => void handleRetry()}
+                      accessibilityLabel="重试"
+                    >
+                      <Icon name="retry" size={16} color={textColor} />
+                      <Text style={[styles.errorRetryText, { color: textColor }]}>重试</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
               ) : isStreamingThis ? (
                 // 仅流式中的助手气泡用纯文本，避免半截 Markdown
                 <Text
@@ -452,15 +494,7 @@ const Home = ({ componentId }: Props) => {
                   onPress={() => void handleRegenerate()}
                 />
               ) : null}
-              {isLast && isError && canRegenerate ? (
-                <IconButton
-                  name="retry"
-                  accessibilityLabel="重试"
-                  color={colors.primary}
-                  size={18}
-                  onPress={() => void handleRetry()}
-                />
-              ) : null}
+              {/* 错误重试已在气泡内「图标+文字」展示，操作条不再重复 */}
               {showExport ? (
                 <IconButton
                   name="export"
@@ -524,6 +558,7 @@ const Home = ({ componentId }: Props) => {
               {currentModel}
               {hasConvPrompt ? ' · 提示词' : ''}
             </Text>
+            <Icon name="chevron-down" size={12} color={colors.textSecondary} />
           </View>
         </TouchableOpacity>
         <IconButton
@@ -538,8 +573,16 @@ const Home = ({ componentId }: Props) => {
 
       {needSetup ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>尚未配置中转站，请先填写 API URL 与 API Key</Text>
-          <TouchableOpacity onPress={() => void navigations.pushSettingScreen(componentId)}>
+          <Icon name="warning" size={16} color="#92400E" />
+          <Text style={[styles.bannerText, { marginLeft: 8 }]}>
+            尚未配置中转站，请先填写 API URL 与 API Key
+          </Text>
+          <TouchableOpacity
+            style={styles.bannerActionRow}
+            onPress={() => void navigations.pushSettingScreen(componentId)}
+            accessibilityLabel="去设置"
+          >
+            <Icon name="settings" size={14} color="#B45309" />
             <Text style={styles.bannerAction}>去设置</Text>
           </TouchableOpacity>
         </View>
@@ -575,25 +618,14 @@ const Home = ({ componentId }: Props) => {
             { backgroundColor: colors.surface, borderTopColor: colors.border },
           ]}
         >
-          <View style={styles.sideBtns}>
-            {/* 清空暂隐藏；导出/分享在最后一条消息下方 */}
-            {/*
-            <IconButton
-              name="trash"
-              accessibilityLabel="清空会话"
-              color={colors.textSecondary}
-              size={20}
-              onPress={handleClear}
-            />
-            */}
-            <IconButton
-              name="prompt"
-              accessibilityLabel="会话提示词"
-              color={hasConvPrompt ? colors.primary : colors.textSecondary}
-              size={20}
-              onPress={() => void openPromptModal()}
-            />
-          </View>
+          <IconButton
+            name="add"
+            accessibilityLabel="更多"
+            color={hasConvPrompt ? colors.primary : colors.textSecondary}
+            size={22}
+            disabled={streaming}
+            onPress={() => setAttachMenuOpen(true)}
+          />
           <TextInput
             style={[
               styles.input,
@@ -647,7 +679,16 @@ const Home = ({ componentId }: Props) => {
             style={[styles.drawer, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}
           >
-            <Text style={[styles.drawerTitle, { color: colors.text }]}>会话</Text>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>会话</Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="关闭"
+                color={colors.textSecondary}
+                size={22}
+                onPress={() => setDrawerOpen(false)}
+              />
+            </View>
             <TouchableOpacity
               style={[styles.newChatBtn, { backgroundColor: colors.primary }]}
               onPress={() => void handleNewChat()}
@@ -704,33 +745,129 @@ const Home = ({ componentId }: Props) => {
         transparent
         onRequestClose={() => setModelPickerOpen(false)}
       >
-        <Pressable style={styles.modalMask} onPress={() => setModelPickerOpen(false)}>
+        <Pressable style={styles.modalMaskCol} onPress={() => setModelPickerOpen(false)}>
           <Pressable
             style={[styles.sheet, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}
           >
-            <Text style={[styles.drawerTitle, { color: colors.text }]}>选择模型</Text>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>选择模型</Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="关闭"
+                color={colors.textSecondary}
+                size={22}
+                onPress={() => setModelPickerOpen(false)}
+              />
+            </View>
             <FlatList
               data={models}
               keyExtractor={(item) => item.id}
               style={{ maxHeight: 360 }}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.convItem,
-                    item.id === currentModel && { backgroundColor: colors.surfaceSecondary },
-                  ]}
-                  onPress={() => void handleSelectModel(item.id)}
-                >
-                  <Text style={{ color: colors.text }}>{item.id}</Text>
-                </TouchableOpacity>
-              )}
+              renderItem={({ item }) => {
+                const selected = item.id === currentModel
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.modelItem,
+                      selected && { backgroundColor: colors.surfaceSecondary },
+                    ]}
+                    onPress={() => void handleSelectModel(item.id)}
+                    accessibilityLabel={selected ? `已选 ${item.id}` : item.id}
+                  >
+                    <Icon
+                      name="model"
+                      size={18}
+                      color={selected ? colors.primary : colors.textSecondary}
+                    />
+                    <Text
+                      style={{
+                        color: colors.text,
+                        flex: 1,
+                        marginLeft: 10,
+                        fontWeight: selected ? '700' : '400',
+                      }}
+                      numberOfLines={1}
+                    >
+                      {item.id}
+                    </Text>
+                    {selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
+                  </TouchableOpacity>
+                )
+              }}
               ListEmptyComponent={
                 <Text style={{ color: colors.textSecondary, padding: 12 }}>
                   暂无模型，请先在设置中测试连接并刷新模型
                 </Text>
               }
             />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 输入区「+」菜单：次要能力（图标+文字） */}
+      <Modal
+        visible={attachMenuOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setAttachMenuOpen(false)}
+      >
+        <Pressable style={styles.modalMaskCol} onPress={() => setAttachMenuOpen(false)}>
+          <Pressable
+            style={[styles.sheet, { backgroundColor: colors.surface }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>更多</Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="关闭"
+                color={colors.textSecondary}
+                size={22}
+                onPress={() => setAttachMenuOpen(false)}
+              />
+            </View>
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={() => {
+                setAttachMenuOpen(false)
+                void openPromptModal()
+              }}
+              accessibilityLabel="会话提示词"
+            >
+              <Icon
+                name="prompt"
+                size={20}
+                color={hasConvPrompt ? colors.primary : colors.textSecondary}
+              />
+              <View style={styles.menuRowText}>
+                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+                  会话提示词
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  {hasConvPrompt ? '已设置本会话覆盖' : '使用全局默认，可在此覆盖'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            {/* 上传图片：入口预留，能力尚未接入 */}
+            <TouchableOpacity
+              style={[styles.menuRow, styles.menuRowDisabled]}
+              disabled
+              accessibilityLabel="上传图片（即将支持）"
+              onPress={() => {
+                // TODO: 接入图片选择与多模态发送
+              }}
+            >
+              <Icon name="image" size={20} color={colors.textSecondary} />
+              <View style={styles.menuRowText}>
+                <Text style={{ color: colors.textSecondary, fontSize: 16, fontWeight: '600' }}>
+                  上传图片
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  即将支持
+                </Text>
+              </View>
+            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -746,7 +883,16 @@ const Home = ({ componentId }: Props) => {
             style={[styles.renameBox, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}
           >
-            <Text style={[styles.drawerTitle, { color: colors.text }]}>重命名会话</Text>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>重命名会话</Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="关闭"
+                color={colors.textSecondary}
+                size={22}
+                onPress={() => setRenameTarget(null)}
+              />
+            </View>
             <TextInput
               style={[
                 styles.input,
@@ -792,7 +938,16 @@ const Home = ({ componentId }: Props) => {
             style={[styles.promptBox, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}
           >
-            <Text style={[styles.drawerTitle, { color: colors.text }]}>本会话系统提示词</Text>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>本会话系统提示词</Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="关闭"
+                color={colors.textSecondary}
+                size={22}
+                onPress={() => setPromptModalOpen(false)}
+              />
+            </View>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
               仅作用于当前会话；留空保存则使用设置里的全局默认。
             </Text>
@@ -841,7 +996,16 @@ const Home = ({ componentId }: Props) => {
             style={[styles.promptBox, { backgroundColor: colors.surface }]}
             onPress={(e) => e.stopPropagation()}
           >
-            <Text style={[styles.drawerTitle, { color: colors.text }]}>编辑并重发</Text>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>编辑并重发</Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="关闭"
+                color={colors.textSecondary}
+                size={22}
+                onPress={() => setEditTarget(null)}
+              />
+            </View>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
               保存后将删除该消息之后的回复，并以新内容重新请求。
             </Text>
@@ -912,12 +1076,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   bannerText: { color: '#92400E', flex: 1, fontSize: 13 },
-  bannerAction: { color: '#B45309', fontWeight: '700', marginLeft: 8 },
+  bannerActionRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 8 },
+  bannerAction: { color: '#B45309', fontWeight: '700' },
   listContent: { padding: 12, paddingBottom: 24, flexGrow: 1 },
   bubbleWrap: { marginVertical: 4, maxWidth: '88%' },
   bubbleLeft: { alignSelf: 'flex-start' },
   bubbleRight: { alignSelf: 'flex-end' },
   bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  errorTitleRow: { flexDirection: 'row', alignItems: 'center' },
+  errorRetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.45)',
+    gap: 6,
+  },
+  errorRetryText: { fontSize: 14, fontWeight: '700' },
   msgActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -943,7 +1122,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 6,
   },
-  sideBtns: { justifyContent: 'flex-end', paddingBottom: 6, gap: 2 },
   input: {
     flex: 1,
     minHeight: 40,
@@ -962,6 +1140,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
+  modalMaskCol: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
   drawer: {
     width: '78%',
     maxWidth: 320,
@@ -969,7 +1148,13 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingHorizontal: 12,
   },
-  drawerTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalHeaderTitle: { fontSize: 18, fontWeight: '700', flex: 1, paddingRight: 8 },
   newChatBtn: {
     borderRadius: 10,
     paddingVertical: 12,
@@ -986,6 +1171,23 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 4,
   },
+  modelItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    gap: 12,
+  },
+  menuRowDisabled: { opacity: 0.55 },
+  menuRowText: { flex: 1 },
   sheet: {
     marginTop: 'auto',
     width: '100%',

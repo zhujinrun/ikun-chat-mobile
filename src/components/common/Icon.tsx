@@ -20,6 +20,9 @@ export type AppIconName =
   | 'chat'
   | 'model'
   | 'thinking'
+  | 'chevron-down'
+  | 'warning'
+  | 'image'
 
 const ICON_MAP: Record<AppIconName, string> = {
   menu: 'menu-outline',
@@ -39,6 +42,9 @@ const ICON_MAP: Record<AppIconName, string> = {
   chat: 'chatbubbles-outline',
   model: 'hardware-chip-outline',
   thinking: 'sync-outline',
+  'chevron-down': 'chevron-down',
+  warning: 'warning-outline',
+  image: 'image-outline',
 }
 
 type Props = {
@@ -52,7 +58,10 @@ type Props = {
  * 统一图标。基于 Ionicons，避免各处散落文字按钮。
  */
 const Icon = ({ name, size = 20, color = '#64748B', style }: Props) => {
-  return <Ionicons name={ICON_MAP[name] as any} size={size} color={color} style={style} />
+  // vector-icons 自带的 @types/react-native 与项目 RN 类型有冲突，style 需放宽
+  return (
+    <Ionicons name={ICON_MAP[name] as any} size={size} color={color} style={style as any} />
+  )
 }
 
 export default Icon
