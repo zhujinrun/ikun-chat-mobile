@@ -46,12 +46,15 @@ const Home = ({ componentId }: Props) => {
   const apiUrl = useSettingValue('api.baseUrl')
   const apiKey = useSettingValue('api.apiKey')
   const fontSize = useSettingValue('common.fontSize')
+  const globalSystemPrompt = useSettingValue('chat.systemPrompt')
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [input, setInput] = useState('')
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
   const [renameText, setRenameText] = useState('')
+  const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [promptDraft, setPromptDraft] = useState('')
   const listRef = useRef<FlatList>(null)
 
   const active = useMemo(
@@ -61,6 +64,7 @@ const Home = ({ componentId }: Props) => {
 
   const currentModel = active?.model || defaultModel || '未选择模型'
   const needSetup = !apiUrl || !apiKey
+  const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
 
   const colors = theme.colors
 
@@ -158,19 +162,49 @@ const Home = ({ componentId }: Props) => {
 
   const lastMessageId = messages.length ? messages[messages.length - 1].id : null
 
-  const handleClear = useCallback(() => {
+  // 清空入口暂隐藏（左侧只保留提示词）；需要时取消注释即可
+  // const handleClear = useCallback(() => {
+  //   if (!activeId) return
+  //   Alert.alert('清空会话', '确定清空当前会话的所有消息？', [
+  //     { text: '取消', style: 'cancel' },
+  //     {
+  //       text: '清空',
+  //       style: 'destructive',
+  //       onPress: () => {
+  //         void conversationAction.clearMessages(activeId)
+  //       },
+  //     },
+  //   ])
+  // }, [activeId])
+
+  const openPromptModal = useCallback(async () => {
+    let conv = active
+    if (!conv) {
+      conv = await conversationAction.createConversation()
+    }
+    setPromptDraft(conv.systemPrompt ?? globalSystemPrompt ?? '')
+    setPromptModalOpen(true)
+  }, [active, globalSystemPrompt])
+
+  const savePrompt = useCallback(async () => {
+    if (!activeId) {
+      setPromptModalOpen(false)
+      return
+    }
+    const trimmed = promptDraft.trim()
+    await conversationAction.updateConversation(activeId, {
+      systemPrompt: trimmed || undefined,
+    })
+    setPromptModalOpen(false)
+    toast(trimmed ? '已保存本会话提示词' : '已恢复为全局默认提示词')
+  }, [activeId, promptDraft])
+
+  const clearPromptOverride = useCallback(async () => {
     if (!activeId) return
-    Alert.alert('清空会话', '确定清空当前会话的所有消息？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '清空',
-        style: 'destructive',
-        onPress: () => {
-          void conversationAction.clearMessages(activeId)
-        },
-      },
-    ])
-  }, [activeId])
+    await conversationAction.updateConversation(activeId, { systemPrompt: undefined })
+    setPromptDraft(globalSystemPrompt ?? '')
+    toast('已清除会话提示词，使用全局默认')
+  }, [activeId, globalSystemPrompt])
 
   const handleMessageLongPress = useCallback(
     (item: LX.ChatMessage) => {
@@ -293,6 +327,7 @@ const Home = ({ componentId }: Props) => {
           </Text>
           <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
             {currentModel}
+            {hasConvPrompt ? ' · 自定义提示词' : ''}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -341,9 +376,23 @@ const Home = ({ componentId }: Props) => {
             { backgroundColor: colors.surface, borderTopColor: colors.border },
           ]}
         >
-          <TouchableOpacity onPress={handleClear} style={styles.sideBtn}>
-            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>清空</Text>
-          </TouchableOpacity>
+          <View style={styles.sideBtns}>
+            {/* 清空暂隐藏，避免与提示词挤在输入区左侧
+            <TouchableOpacity onPress={handleClear} style={styles.sideBtn}>
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>清空</Text>
+            </TouchableOpacity>
+            */}
+            <TouchableOpacity onPress={() => void openPromptModal()} style={styles.sideBtn}>
+              <Text
+                style={{
+                  color: hasConvPrompt ? colors.primary : colors.textSecondary,
+                  fontSize: 12,
+                }}
+              >
+                提示词
+              </Text>
+            </TouchableOpacity>
+          </View>
           <TextInput
             style={[
               styles.input,
@@ -522,6 +571,56 @@ const Home = ({ componentId }: Props) => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* 本会话系统提示词 */}
+      <Modal
+        visible={promptModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPromptModalOpen(false)}
+      >
+        <Pressable style={styles.renameMask} onPress={() => setPromptModalOpen(false)}>
+          <Pressable
+            style={[styles.promptBox, { backgroundColor: colors.surface }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={[styles.drawerTitle, { color: colors.text }]}>本会话系统提示词</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+              仅作用于当前会话；留空保存则使用设置里的全局默认。
+            </Text>
+            <TextInput
+              style={[
+                styles.promptInput,
+                {
+                  backgroundColor: colors.inputBg,
+                  color: colors.text,
+                  borderColor: colors.border,
+                  fontSize,
+                },
+              ]}
+              value={promptDraft}
+              onChangeText={setPromptDraft}
+              multiline
+              textAlignVertical="top"
+              placeholder="输入 system prompt…"
+              placeholderTextColor={colors.textSecondary}
+            />
+            <View style={styles.promptActions}>
+              <TouchableOpacity onPress={() => void clearPromptOverride()}>
+                <Text style={{ color: colors.textSecondary }}>用全局默认</Text>
+              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 16 }}>
+                <TouchableOpacity onPress={() => setPromptModalOpen(false)}>
+                  <Text style={{ color: colors.textSecondary }}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => void savePrompt()}>
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -573,12 +672,24 @@ const styles = StyleSheet.create({
   emptyDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
   composer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     padding: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 6,
   },
-  sideBtn: { paddingBottom: 12, paddingHorizontal: 4 },
+  sideBtns: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    paddingBottom: 0,
+    gap: 8,
+  },
+  sideBtn: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   input: {
     flex: 1,
     minHeight: 40,
@@ -592,7 +703,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    marginBottom: 2,
+    alignSelf: 'center',
+    marginBottom: 0,
   },
   sendText: { color: '#fff', fontWeight: '700' },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
@@ -640,6 +752,25 @@ const styles = StyleSheet.create({
   },
   renameActionText: {
     lineHeight: 20,
+  },
+  promptBox: {
+    borderRadius: 14,
+    padding: 16,
+    maxHeight: '80%',
+  },
+  promptInput: {
+    minHeight: 140,
+    maxHeight: 280,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  promptActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
 })
 
