@@ -1,3 +1,25 @@
+pluginManagement {
+  repositories {
+    google()
+    mavenCentral()
+    gradlePluginPortal()
+  }
+}
+
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+  repositories {
+    google()
+    mavenCentral()
+    maven {
+      url 'https://www.jitpack.io'
+      content {
+        includeGroupByRegex "com\\.github\\..*"
+      }
+    }
+  }
+}
+
 rootProject.name = 'com.ikunshare.chat.mobile'
 apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesSettingsGradle(settings)
 include ':app'
