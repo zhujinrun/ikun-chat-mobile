@@ -269,8 +269,7 @@ const Setting = (_props: Props) => {
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={{ color: colors.text, lineHeight: 22 }}>
           IKUN Chat Mobile{'\n'}
-          通用 OpenAI 兼容中转站客户端{'\n'}
-          版本请以 package.json / Release 为准
+          通用 OpenAI 兼容中转站客户端
         </Text>
       </View>
     </ScrollView>

@@ -146,6 +146,21 @@ export default {
     global.state_event.messagesUpdated(conversationId)
   },
 
+  /** 保留 [0, keepUntilIndex]（含），删除之后的消息 */
+  async trimMessagesTo(conversationId: string, keepUntilIndex: number) {
+    const list = state.messages[conversationId]
+    if (!list) return
+    if (keepUntilIndex < 0) {
+      state.messages[conversationId] = []
+    } else if (keepUntilIndex < list.length - 1) {
+      state.messages[conversationId] = list.slice(0, keepUntilIndex + 1)
+    } else {
+      return
+    }
+    await persistMessages(conversationId)
+    global.state_event.messagesUpdated(conversationId)
+  },
+
   async clearMessages(conversationId: string) {
     state.messages[conversationId] = []
     await persistMessages(conversationId)

@@ -136,6 +136,28 @@ const Home = ({ componentId }: Props) => {
     toast('已复制')
   }, [])
 
+  const handleRegenerate = useCallback(async () => {
+    if (streaming) return
+    if (needSetup) {
+      toast('请先在设置中配置 API URL 和 API Key')
+      void navigations.pushSettingScreen(componentId)
+      return
+    }
+    try {
+      await chatAction.regenerate()
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
+    } catch (err: any) {
+      toast(err?.message || '重新生成失败')
+    }
+  }, [streaming, needSetup, componentId])
+
+  const canRegenerate = useMemo(() => {
+    if (streaming || !messages.length) return false
+    return chatAction.canRegenerate()
+  }, [streaming, messages])
+
+  const lastMessageId = messages.length ? messages[messages.length - 1].id : null
+
   const handleClear = useCallback(() => {
     if (!activeId) return
     Alert.alert('清空会话', '确定清空当前会话的所有消息？', [
@@ -150,44 +172,106 @@ const Home = ({ componentId }: Props) => {
     ])
   }, [activeId])
 
+  const handleMessageLongPress = useCallback(
+    (item: LX.ChatMessage) => {
+      const isLast = item.id === lastMessageId
+      const buttons: {
+        text: string
+        style?: 'cancel' | 'destructive' | 'default'
+        onPress?: () => void
+      }[] = [{ text: '取消', style: 'cancel' }]
+
+      if (item.content) {
+        buttons.push({
+          text: '复制',
+          onPress: () => handleCopy(item.content),
+        })
+      }
+      if (canRegenerate && isLast) {
+        buttons.push({
+          text: '重新生成',
+          onPress: () => {
+            void handleRegenerate()
+          },
+        })
+      }
+      if (buttons.length <= 1) return
+      Alert.alert('消息', undefined, buttons)
+    },
+    [lastMessageId, canRegenerate, handleCopy, handleRegenerate]
+  )
+
   const renderMessage = useCallback(
     ({ item }: { item: LX.ChatMessage }) => {
       const isUser = item.role === 'user'
       const isError = item.role === 'error'
+      const isLast = item.id === lastMessageId
+      const showRegenActions = canRegenerate && isLast && !isUser
       const bubbleBg = isError
         ? colors.error
         : isUser
           ? colors.userBubble
           : colors.assistantBubble
       const textColor = isUser || isError ? colors.textInverse : colors.text
+      const isStreamingThis =
+        streaming && item.id === conversationState.messages[activeId || '']?.slice(-1)[0]?.id
 
       return (
-        <Pressable
-          onLongPress={() => item.content && handleCopy(item.content)}
+        <View
           style={[
             styles.bubbleWrap,
             isUser ? styles.bubbleRight : styles.bubbleLeft,
           ]}
         >
-          <View
-            style={[
-              styles.bubble,
-              {
-                backgroundColor: bubbleBg,
-                borderColor: colors.border,
-                borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
-              },
-            ]}
-          >
-            <Text style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}>
-              {item.content || (streaming && item.id === conversationState.messages[activeId || '']?.slice(-1)[0]?.id ? '…' : '')}
-              {!item.content && streaming ? '正在思考…' : ''}
-            </Text>
-          </View>
-        </Pressable>
+          <Pressable onLongPress={() => handleMessageLongPress(item)}>
+            <View
+              style={[
+                styles.bubble,
+                {
+                  backgroundColor: bubbleBg,
+                  borderColor: colors.border,
+                  borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
+                },
+              ]}
+            >
+              <Text style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}>
+                {item.content || (isStreamingThis ? '…' : '')}
+                {!item.content && streaming ? '正在思考…' : ''}
+              </Text>
+            </View>
+          </Pressable>
+          {showRegenActions ? (
+            <View style={styles.msgActions}>
+              {item.content ? (
+                <TouchableOpacity
+                  onPress={() => handleCopy(item.content)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={[styles.msgActionText, { color: colors.textSecondary }]}>复制</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => void handleRegenerate()}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[styles.msgActionText, { color: colors.primary }]}>重新生成</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
       )
     },
-    [colors, fontSize, handleCopy, streaming, activeId]
+    [
+      colors,
+      fontSize,
+      handleCopy,
+      handleMessageLongPress,
+      handleRegenerate,
+      streaming,
+      activeId,
+      lastMessageId,
+      canRegenerate,
+    ]
   )
 
   return (
@@ -240,7 +324,7 @@ const Home = ({ componentId }: Props) => {
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>开始对话</Text>
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              配置中转站后，选择模型即可聊天。长按消息可复制。
+              配置中转站后，选择模型即可聊天。长按消息可复制；助手回复可重新生成。
             </Text>
           </View>
         }
@@ -476,6 +560,14 @@ const styles = StyleSheet.create({
   bubbleLeft: { alignSelf: 'flex-start' },
   bubbleRight: { alignSelf: 'flex-end' },
   bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  msgActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 6,
+    paddingHorizontal: 4,
+  },
+  msgActionText: { fontSize: 13, fontWeight: '600' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 32 },
   emptyTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
   emptyDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
