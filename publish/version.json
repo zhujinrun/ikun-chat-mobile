@@ -1,5 +1,1 @@
-{
-  "version": "0.1.0",
-  "desc": "首个版本：通用 OpenAI 兼容中转站 Chat 客户端",
-  "history": []
-}
+{"version":"0.1.1","desc":"新增\n- 重新生成\n- 会话级系统提示词\n- 助手消息 Markdown 渲染\n\n修复\n- 会话落盘与冷启动/流式闪退\n- 异常落盘与下次启动展示\n\n优化\n- 首页提示词入口","history":[{"version":"0.1.0","desc":"首个版本：通用 OpenAI 兼容中转站 Chat 客户端"}]}
