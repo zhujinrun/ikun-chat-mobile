@@ -43,6 +43,7 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native-clipboard/clipboard": "^1.16.3",
+    "@react-native-vector-icons/ionicons": "^12.5.0",
     "react": "18.2.0",
     "react-native": "0.73.11",
     "react-native-exception-handler": "^2.10.10",

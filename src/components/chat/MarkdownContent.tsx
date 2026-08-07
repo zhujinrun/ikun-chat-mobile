@@ -7,9 +7,13 @@ import {
   ScrollView,
   Image,
   Pressable,
+  TouchableOpacity,
   type LayoutChangeEvent,
 } from 'react-native'
+import Clipboard from '@react-native-clipboard/clipboard'
 import { useTheme } from '@/store/theme/hook'
+import { toast } from '@/utils/toast'
+import Icon from '@/components/common/Icon'
 import MarkdownErrorBoundary from './MarkdownErrorBoundary'
 
 type Props = {
@@ -122,8 +126,25 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
         codeBlock: {
           backgroundColor: codeBg,
           borderRadius: 8,
-          padding: 10,
           marginVertical: 6,
+          overflow: 'hidden',
+        },
+        codeHeader: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: colors.border,
+        },
+        codeLang: {
+          color: muted,
+          fontSize: 11,
+          fontWeight: '600',
+        },
+        codeBody: {
+          padding: 10,
         },
         codeText: {
           color,
@@ -469,9 +490,24 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
             case 'code':
               return (
                 <View key={key} style={styles.codeBlock}>
-                  <Text style={styles.codeText} selectable>
-                    {b.text}
-                  </Text>
+                  <View style={styles.codeHeader}>
+                    <Text style={styles.codeLang}>{b.lang || 'code'}</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Clipboard.setString(b.text)
+                        toast('代码已复制')
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="复制代码"
+                    >
+                      <Icon name="copy" size={14} color={colors.primary} />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.codeBody}>
+                    <Text style={styles.codeText} selectable>
+                      {b.text}
+                    </Text>
+                  </View>
                 </View>
               )
             case 'hr':

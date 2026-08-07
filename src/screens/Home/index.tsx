@@ -32,6 +32,9 @@ import { navigations } from '@/navigation'
 import { toast } from '@/utils/toast'
 import { formatConversationText } from '@/utils/exportConversation'
 import MarkdownContent from '@/components/chat/MarkdownContent'
+import Icon from '@/components/common/Icon'
+import IconButton from '@/components/common/IconButton'
+import ThinkingIndicator from '@/components/common/ThinkingIndicator'
 
 type Props = {
   componentId: string
@@ -391,11 +394,9 @@ const Home = ({ componentId }: Props) => {
               ]}
             >
               {!item.content ? (
-                <Text
-                  style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
-                >
-                  {isStreamingThis ? '正在思考…' : ''}
-                </Text>
+                isStreamingThis ? (
+                  <ThinkingIndicator color={textColor} size={Math.max(16, fontSize)} />
+                ) : null
               ) : isUser || isError ? (
                 <Text
                   style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
@@ -425,49 +426,49 @@ const Home = ({ componentId }: Props) => {
           {showActions ? (
             <View style={[styles.msgActions, isUser && styles.msgActionsRight]}>
               {item.content ? (
-                <TouchableOpacity
+                <IconButton
+                  name="copy"
+                  accessibilityLabel="复制"
+                  color={colors.textSecondary}
+                  size={18}
                   onPress={() => handleCopy(item.content)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={[styles.msgActionText, { color: colors.textSecondary }]}>
-                    复制
-                  </Text>
-                </TouchableOpacity>
+                />
               ) : null}
               {isUser ? (
-                <TouchableOpacity
+                <IconButton
+                  name="edit"
+                  accessibilityLabel="编辑并重发"
+                  color={colors.primary}
+                  size={18}
                   onPress={() => openEditMessage(item)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={[styles.msgActionText, { color: colors.primary }]}>编辑</Text>
-                </TouchableOpacity>
+                />
               ) : null}
               {isLast && item.role === 'assistant' && canRegenerate ? (
-                <TouchableOpacity
+                <IconButton
+                  name="refresh"
+                  accessibilityLabel="重新生成"
+                  color={colors.primary}
+                  size={18}
                   onPress={() => void handleRegenerate()}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={[styles.msgActionText, { color: colors.primary }]}>重新生成</Text>
-                </TouchableOpacity>
+                />
               ) : null}
               {isLast && isError && canRegenerate ? (
-                <TouchableOpacity
+                <IconButton
+                  name="retry"
+                  accessibilityLabel="重试"
+                  color={colors.primary}
+                  size={18}
                   onPress={() => void handleRetry()}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={[styles.msgActionText, { color: colors.primary }]}>重试</Text>
-                </TouchableOpacity>
+                />
               ) : null}
               {showExport ? (
-                <TouchableOpacity
-                  onPress={() => void handleExport()}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                <IconButton
+                  name="export"
                   accessibilityLabel="导出/分享会话"
-                >
-                  <Text style={[styles.msgActionText, { color: colors.textSecondary }]}>
-                    导出
-                  </Text>
-                </TouchableOpacity>
+                  color={colors.textSecondary}
+                  size={18}
+                  onPress={() => void handleExport()}
+                />
               ) : null}
             </View>
           ) : null}
@@ -505,24 +506,34 @@ const Home = ({ componentId }: Props) => {
           { backgroundColor: colors.surface, borderBottomColor: colors.border },
         ]}
       >
-        <TouchableOpacity style={styles.headerBtn} onPress={() => setDrawerOpen(true)}>
-          <Text style={[styles.headerBtnText, { color: colors.primary }]}>菜单</Text>
-        </TouchableOpacity>
+        <IconButton
+          name="menu"
+          accessibilityLabel="菜单"
+          color={colors.primary}
+          size={24}
+          style={styles.headerBtn}
+          onPress={() => setDrawerOpen(true)}
+        />
         <TouchableOpacity style={styles.headerCenter} onPress={() => setModelPickerOpen(true)}>
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {active?.title || 'IKUN Chat'}
           </Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
-            {currentModel}
-            {hasConvPrompt ? ' · 自定义提示词' : ''}
-          </Text>
+          <View style={styles.headerSubRow}>
+            <Icon name="model" size={12} color={colors.textSecondary} />
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
+              {currentModel}
+              {hasConvPrompt ? ' · 提示词' : ''}
+            </Text>
+          </View>
         </TouchableOpacity>
-        <TouchableOpacity
+        <IconButton
+          name="settings"
+          accessibilityLabel="设置"
+          color={colors.primary}
+          size={24}
           style={styles.headerBtn}
           onPress={() => void navigations.pushSettingScreen(componentId)}
-        >
-          <Text style={[styles.headerBtnText, { color: colors.primary }]}>设置</Text>
-        </TouchableOpacity>
+        />
       </View>
 
       {needSetup ? (
@@ -567,20 +578,21 @@ const Home = ({ componentId }: Props) => {
           <View style={styles.sideBtns}>
             {/* 清空暂隐藏；导出/分享在最后一条消息下方 */}
             {/*
-            <TouchableOpacity onPress={handleClear} style={styles.sideBtn}>
-              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>清空</Text>
-            </TouchableOpacity>
+            <IconButton
+              name="trash"
+              accessibilityLabel="清空会话"
+              color={colors.textSecondary}
+              size={20}
+              onPress={handleClear}
+            />
             */}
-            <TouchableOpacity onPress={() => void openPromptModal()} style={styles.sideBtn}>
-              <Text
-                style={{
-                  color: hasConvPrompt ? colors.primary : colors.textSecondary,
-                  fontSize: 12,
-                }}
-              >
-                提示词
-              </Text>
-            </TouchableOpacity>
+            <IconButton
+              name="prompt"
+              accessibilityLabel="会话提示词"
+              color={hasConvPrompt ? colors.primary : colors.textSecondary}
+              size={20}
+              onPress={() => void openPromptModal()}
+            />
           </View>
           <TextInput
             style={[
@@ -604,8 +616,9 @@ const Home = ({ componentId }: Props) => {
             <TouchableOpacity
               style={[styles.sendBtn, { backgroundColor: colors.error }]}
               onPress={handleStop}
+              accessibilityLabel="停止生成"
             >
-              <Text style={styles.sendText}>停止</Text>
+              <Icon name="stop" size={18} color="#fff" />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -615,8 +628,9 @@ const Home = ({ componentId }: Props) => {
               ]}
               onPress={() => void handleSend()}
               disabled={!input.trim()}
+              accessibilityLabel="发送"
             >
-              <Text style={styles.sendText}>发送</Text>
+              <Icon name="send" size={18} color="#fff" />
             </TouchableOpacity>
           )}
         </View>
@@ -637,8 +651,10 @@ const Home = ({ componentId }: Props) => {
             <TouchableOpacity
               style={[styles.newChatBtn, { backgroundColor: colors.primary }]}
               onPress={() => void handleNewChat()}
+              accessibilityLabel="新对话"
             >
-              <Text style={styles.newChatText}>+ 新对话</Text>
+              <Icon name="add" size={20} color="#fff" />
+              <Text style={styles.newChatText}>新对话</Text>
             </TouchableOpacity>
             <FlatList
               data={conversations}
@@ -876,11 +892,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 8 : 10,
   },
-  headerBtn: { paddingHorizontal: 10, paddingVertical: 6 },
-  headerBtnText: { fontSize: 15, fontWeight: '600' },
+  headerBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
   headerTitle: { fontSize: 16, fontWeight: '700' },
-  headerSub: { fontSize: 12, marginTop: 2 },
+  headerSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+    maxWidth: '100%',
+  },
+  headerSub: { fontSize: 12, flexShrink: 1 },
   banner: {
     backgroundColor: '#FEF3C7',
     paddingHorizontal: 12,
@@ -900,12 +922,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 16,
-    marginTop: 6,
-    paddingHorizontal: 4,
+    gap: 4,
+    marginTop: 4,
+    paddingHorizontal: 2,
   },
   msgActionsRight: { justifyContent: 'flex-end' },
-  msgActionText: { fontSize: 13, fontWeight: '600' },
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -922,19 +943,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 6,
   },
-  sideBtns: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignSelf: 'center',
-    paddingBottom: 0,
-    gap: 8,
-  },
-  sideBtn: {
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  sideBtns: { justifyContent: 'flex-end', paddingBottom: 6, gap: 2 },
   input: {
     flex: 1,
     minHeight: 40,
@@ -946,12 +955,12 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignSelf: 'center',
-    marginBottom: 0,
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
   },
-  sendText: { color: '#fff', fontWeight: '700' },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
   drawer: {
     width: '78%',
@@ -965,9 +974,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
     marginBottom: 12,
   },
-  newChatText: { color: '#fff', fontWeight: '700' },
+  newChatText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   convItem: {
     paddingVertical: 12,
     paddingHorizontal: 10,
