@@ -13,6 +13,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Share,
 } from 'react-native'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { useTheme } from '@/store/theme/hook'
@@ -29,6 +30,7 @@ import settingAction from '@/store/setting/action'
 import { useSettingValue } from '@/store/setting/hook'
 import { navigations } from '@/navigation'
 import { toast } from '@/utils/toast'
+import { formatConversationText } from '@/utils/exportConversation'
 import MarkdownContent from '@/components/chat/MarkdownContent'
 
 type Props = {
@@ -266,6 +268,39 @@ const Home = ({ componentId }: Props) => {
     toast('已清除会话提示词，使用全局默认')
   }, [activeId, globalSystemPrompt])
 
+  const handleExport = useCallback(async () => {
+    if (!messages.length) {
+      toast('当前会话没有消息可导出')
+      return
+    }
+    const text = formatConversationText(
+      active?.title || '会话',
+      active?.model || defaultModel || undefined,
+      messages
+    )
+    Alert.alert('导出会话', '选择导出方式', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '复制全文',
+        onPress: () => {
+          Clipboard.setString(text)
+          toast('已复制到剪贴板')
+        },
+      },
+      {
+        text: '系统分享',
+        onPress: () => {
+          void Share.share({
+            message: text,
+            title: active?.title || 'IKUN Chat 会话',
+          }).catch(() => {
+            toast('分享取消或失败')
+          })
+        },
+      },
+    ])
+  }, [messages, active, defaultModel])
+
   const handleMessageLongPress = useCallback(
     (item: LX.ChatMessage) => {
       if (streaming) return
@@ -324,11 +359,14 @@ const Home = ({ componentId }: Props) => {
       const isError = item.role === 'error'
       const isLast = item.id === lastMessageId
       const isStreamingThis = streaming && item.id === streamingMessageId
-      const showActions = !streaming && (
-        (isUser) ||
-        (isLast && isError && canRegenerate) ||
-        (isLast && item.role === 'assistant' && canRegenerate)
-      )
+      // 导出会话：挂在最后一条消息下方，不与输入区提示词挤在一起
+      const showExport = isLast && !streaming && messages.length > 0
+      const showActions =
+        !streaming &&
+        (isUser ||
+          (isLast && isError && canRegenerate) ||
+          (isLast && item.role === 'assistant' && canRegenerate) ||
+          showExport)
 
       const bubbleBg = isError
         ? colors.error
@@ -420,6 +458,17 @@ const Home = ({ componentId }: Props) => {
                   <Text style={[styles.msgActionText, { color: colors.primary }]}>重试</Text>
                 </TouchableOpacity>
               ) : null}
+              {showExport ? (
+                <TouchableOpacity
+                  onPress={() => void handleExport()}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="导出/分享会话"
+                >
+                  <Text style={[styles.msgActionText, { color: colors.textSecondary }]}>
+                    导出
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -429,6 +478,7 @@ const Home = ({ componentId }: Props) => {
       colors,
       fontSize,
       handleCopy,
+      handleExport,
       handleMessageLongPress,
       handleRegenerate,
       handleRetry,
@@ -437,6 +487,7 @@ const Home = ({ componentId }: Props) => {
       streamingMessageId,
       lastMessageId,
       canRegenerate,
+      messages.length,
     ]
   )
 
@@ -514,7 +565,8 @@ const Home = ({ componentId }: Props) => {
           ]}
         >
           <View style={styles.sideBtns}>
-            {/* 清空暂隐藏，避免与提示词挤在输入区左侧
+            {/* 清空暂隐藏；导出/分享在最后一条消息下方 */}
+            {/*
             <TouchableOpacity onPress={handleClear} style={styles.sideBtn}>
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>清空</Text>
             </TouchableOpacity>
