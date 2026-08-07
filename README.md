@@ -33,8 +33,27 @@ npm run dev
 
 ### 本地 Release 打包
 
-1. 在 `android/keystore.properties` 配置签名（参考下方）
-2. 执行：
+开发调试使用已提交的 `android/app/debug.keystore`；本地 Release 打包使用 `android/keystore.properties`，该文件已加入 `.gitignore`，请勿提交。
+
+`android/keystore.properties` 参数：
+
+| 参数 | 说明 |
+|------|------|
+| `storeFile` | keystore 文件路径，支持绝对路径、`~/` 路径，或相对 `android/` 的路径 |
+| `storePassword` | keystore store 密码 |
+| `keyAlias` | 签名 key 别名 |
+| `keyPassword` | 签名 key 密码 |
+
+示例：
+
+```properties
+storeFile=~/ikun-chat.keystore
+storePassword=***
+keyAlias=***
+keyPassword=***
+```
+
+执行打包：
 
 ```bash
 npm run pack
@@ -42,42 +61,30 @@ npm run pack
 
 产物位于 `android/app/build/outputs/apk/release/`，命名形如：
 
-```
-ikun-chat-mobile-v0.1.0-arm64-v8a.apk
-ikun-chat-mobile-v0.1.0-universal.apk
+```text
+ikun-chat-mobile-v0.1.1-arm64-v8a.apk
+ikun-chat-mobile-v0.1.1-universal.apk
 ...
 ```
 
-### keystore.properties 示例
+## GitHub Actions 打包
 
-```properties
-storeFile=../app/your.keystore
-storePassword=***
-keyAlias=***
-keyPassword=***
-```
-
-该文件已加入 `.gitignore`，请勿提交。
-
-## GitHub 自动发布
-
-Push 到 `main` 或手动 `workflow_dispatch` 触发 `.github/workflows/release.yml`。
+Push `main` 或手动 `workflow_dispatch` 触发 `.github/workflows/release.yml`。CI 会把 Secrets 解码为 keystore 文件，并通过 `KEYSTORE_*` 环境变量供 Gradle 读取。
 
 需在仓库 Secrets 配置：
 
-| Secret | 说明 |
-|--------|------|
-| `KEYSTORE_STORE_FILE_BASE64` | keystore 文件 base64 |
-| `KEYSTORE_STORE_FILE` | 文件名 |
-| `KEYSTORE_KEY_ALIAS` | 别名 |
-| `KEYSTORE_PASSWORD` | store 密码 |
-| `KEYSTORE_KEY_PASSWORD` | key 密码 |
+| Secret | 注入环境变量 | 说明 |
+|--------|--------------|------|
+| `KEYSTORE_STORE_FILE_BASE64` | `KEYSTORE_BASE64` | keystore 文件 base64 内容 |
+| `KEYSTORE_STORE_FILE` | `KEYSTORE_FILE` | keystore 文件名，例如 `ikun-chat.keystore` |
+| `KEYSTORE_KEY_ALIAS` | `KEYSTORE_ALIAS` | 签名 key 别名 |
+| `KEYSTORE_PASSWORD` | `KEYSTORE_STORE_PASSWORD` | keystore store 密码 |
+| `KEYSTORE_KEY_PASSWORD` | `KEYSTORE_KEY_PASSWORD` | 签名 key 密码 |
 
 发版前可更新版本与日志：
 
 ```bash
-# 编辑 publish/changeLog.md 后
-npm run publish 0.1.1
+npm run publish 0.1.1   # 升版本后再 push 发版
 ```
 
 ## 中转站配置说明

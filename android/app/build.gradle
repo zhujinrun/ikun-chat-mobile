@@ -28,6 +28,71 @@ def npmPackageJson = getNpmPackageJson()
 def verCode = npmPackageJson["versionCode"]
 def verName = npmPackageJson["version"]
 def applicationName = npmPackageJson["name"]
+def hasText = { value -> value != null && value.toString().trim() }
+def resolveLocalStoreFile = { rawPath ->
+  def path = rawPath.toString().trim()
+  if (path == "~") return new File(System.getProperty("user.home"))
+  if (path.startsWith("~/")) return new File(System.getProperty("user.home"), path.substring(2))
+
+  def storeFile = new File(path)
+  return storeFile.isAbsolute() ? storeFile : rootProject.file(path)
+}
+def releaseSigningConfigured = false
+def releaseSigningError =
+  "Release 打包未配置签名：本地使用 android/keystore.properties，CI 使用 GitHub Secrets 注入的 KEYSTORE_* 环境变量"
+
+def configureReleaseSigning = { signing ->
+  def ciSigning = [
+    storeFile: System.getenv('KEYSTORE_FILE')?.trim(),
+    storePassword: System.getenv('KEYSTORE_STORE_PASSWORD'),
+    keyAlias: System.getenv('KEYSTORE_ALIAS'),
+    keyPassword: System.getenv('KEYSTORE_KEY_PASSWORD'),
+  ]
+  def hasCiSigning = ciSigning.values().any { hasText(it) }
+
+  if (hasCiSigning) {
+    def missingCiKeys = ciSigning.findAll { key, value -> !hasText(value) }.keySet()
+    if (missingCiKeys.isEmpty()) {
+      def ciStoreFile = file(ciSigning.storeFile)
+      if (ciStoreFile.isFile()) {
+        // GitHub Actions release: secrets are exposed as KEYSTORE_* environment variables.
+        signing.storeFile = ciStoreFile
+        signing.storePassword = ciSigning.storePassword
+        signing.keyAlias = ciSigning.keyAlias
+        signing.keyPassword = ciSigning.keyPassword
+        releaseSigningConfigured = true
+      } else {
+        releaseSigningError = "CI 签名文件不存在: ${ciStoreFile.absolutePath}"
+      }
+    } else {
+      releaseSigningError = "CI 签名环境变量不完整，缺少: ${missingCiKeys.join(', ')}"
+    }
+  } else {
+    def keystorePropertiesFile = rootProject.file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+      def keystoreProperties = new Properties()
+      keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+      def requiredKeys = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+      def missingLocalKeys = requiredKeys.findAll { key -> !hasText(keystoreProperties[key]) }
+
+      if (missingLocalKeys.isEmpty()) {
+        def localStoreFile = resolveLocalStoreFile(keystoreProperties['storeFile'])
+        if (!localStoreFile.isFile()) {
+          releaseSigningError = "本地签名文件不存在: ${localStoreFile.absolutePath}"
+        } else {
+          // Local release: android/keystore.properties points to the private keystore.
+          signing.storeFile = localStoreFile
+          signing.storePassword = keystoreProperties['storePassword'].toString()
+          signing.keyAlias = keystoreProperties['keyAlias'].toString()
+          signing.keyPassword = keystoreProperties['keyPassword'].toString()
+          releaseSigningConfigured = true
+        }
+      } else {
+        releaseSigningError = "android/keystore.properties 缺少: ${missingLocalKeys.join(', ')}"
+      }
+    }
+  }
+}
 
 android {
   ndkVersion rootProject.ext.ndkVersion
@@ -53,30 +118,16 @@ android {
     }
   }
   signingConfigs {
-    release {
-      if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
-        storeFile file(MYAPP_UPLOAD_STORE_FILE)
-        storePassword MYAPP_UPLOAD_STORE_PASSWORD
-        keyAlias MYAPP_UPLOAD_KEY_ALIAS
-        keyPassword MYAPP_UPLOAD_KEY_PASSWORD
-      } else {
-        def keystorePropertiesFile = rootProject.file("keystore.properties")
-        if (keystorePropertiesFile.exists()) {
-          def keystoreProperties = new Properties()
-          keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-
-          storeFile file(keystoreProperties['storeFile'])
-          storePassword keystoreProperties['storePassword']
-          keyAlias keystoreProperties['keyAlias']
-          keyPassword keystoreProperties['keyPassword']
-        }
-      }
-    }
+    // Development debug: use the committed Android debug keystore.
     debug {
       storeFile file('debug.keystore')
       storePassword 'android'
       keyAlias 'androiddebugkey'
       keyPassword 'android'
+    }
+
+    release {
+      configureReleaseSigning(delegate)
     }
   }
   buildTypes {
@@ -84,16 +135,10 @@ android {
       signingConfig signingConfigs.debug
     }
     release {
+      signingConfig signingConfigs.release
       minifyEnabled enableProguardInReleaseBuilds
-      // 移除未使用资源，进一步缩小 release 体积
       shrinkResources enableProguardInReleaseBuilds
       proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-      if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE') || rootProject.file("keystore.properties").exists()) {
-        signingConfig signingConfigs.release
-      } else {
-        // 无正式签名时回退 debug 签名，便于本地验证体积
-        signingConfig signingConfigs.debug
-      }
     }
   }
 
@@ -111,6 +156,15 @@ android {
           "${applicationName}-v${defaultConfig.versionName}-${abi}.apk"
       }
     }
+  }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+  def hasAppReleaseTask = taskGraph.allTasks.any { task ->
+    task.project == project && task.name.toLowerCase().contains("release")
+  }
+  if (hasAppReleaseTask && !releaseSigningConfigured) {
+    throw new GradleException(releaseSigningError)
   }
 }
 
