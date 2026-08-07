@@ -1,5 +1,5 @@
-name: Setup
-description: Setup Env
+name: Upload APK artifacts
+description: Upload release APKs
 
 runs:
   using: composite

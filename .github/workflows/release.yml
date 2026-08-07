@@ -6,25 +6,68 @@ on:
       - main
   workflow_dispatch:
 
+# GITHUB_TOKEN 默认只读会导致打 tag / 创建 Release 403
+permissions:
+  contents: write
+
 jobs:
   Android:
     name: Android
     runs-on: ubuntu-latest
     steps:
       - name: Check out git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          # 允许后续 job / action 推送 tag
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Env
         uses: ./.github/actions/setup
 
-      - name: Build Packages
-        shell: bash
+      - name: Decode release keystore
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }}
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_STORE_FILE }}
         run: |
-          cd android
-          echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_FILE:-}" ]; then
+            echo "缺少 Secrets: KEYSTORE_STORE_FILE_BASE64 / KEYSTORE_STORE_FILE"
+            exit 1
+          fi
+          # 兼容单行/多行 base64
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > "app/${KEYSTORE_FILE}"
+          if [ ! -s "app/${KEYSTORE_FILE}" ]; then
+            echo "keystore 解码结果为空，请检查 KEYSTORE_STORE_FILE_BASE64"
+            exit 1
+          fi
+          ls -la "app/${KEYSTORE_FILE}"
+
+      - name: Build Packages
+        working-directory: android
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_STORE_FILE }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
+          KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_FILE:-}" ] || [ -z "${KEYSTORE_ALIAS:-}" ] || [ -z "${KEYSTORE_STORE_PASSWORD:-}" ] || [ -z "${KEYSTORE_KEY_PASSWORD:-}" ]; then
+            echo "缺少签名 Secrets: KEYSTORE_STORE_FILE / KEYSTORE_KEY_ALIAS / KEYSTORE_PASSWORD / KEYSTORE_KEY_PASSWORD"
+            exit 1
+          fi
+          trap 'rm -f "app/${KEYSTORE_FILE}"' EXIT
           chmod +x ./gradlew
-          ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
-          rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
+          ./gradlew --no-daemon --max-workers=2 --stacktrace assembleRelease
+
+      - name: Upload JVM crash log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-jvm-crash-log
+          path: android/hs_err_pid*.log
+          if-no-files-found: ignore
 
       - name: Get package version
         shell: pwsh
@@ -55,12 +98,14 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     needs: [Android]
+    permissions:
+      contents: write
     steps:
       - name: Check out git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: ./artifacts
           merge-multiple: true
