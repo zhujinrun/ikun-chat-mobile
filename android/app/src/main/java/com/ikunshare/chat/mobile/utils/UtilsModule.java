@@ -51,6 +51,61 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     return "UtilsModule";
   }
 
+  /** 读取上次原生/JS 落盘的崩溃报告（无则 null） */
+  @ReactMethod
+  public void getLastCrashReport(Promise promise) {
+    try {
+      String report = CrashReporter.read(reactContext);
+      promise.resolve(report);
+    } catch (Exception e) {
+      promise.reject("CRASH_READ", e);
+    }
+  }
+
+  @ReactMethod
+  public void getCrashLogPath(Promise promise) {
+    try {
+      promise.resolve(CrashReporter.getLastReportPath(reactContext));
+    } catch (Exception e) {
+      promise.reject("CRASH_PATH", e);
+    }
+  }
+
+  @ReactMethod
+  public void clearLastCrashReport(Promise promise) {
+    try {
+      CrashReporter.clear(reactContext);
+      promise.resolve(true);
+    } catch (Exception e) {
+      promise.reject("CRASH_CLEAR", e);
+    }
+  }
+
+  /** 异步写入（一般业务用） */
+  @ReactMethod
+  public void writeCrashReport(String kind, String where, String body, Promise promise) {
+    try {
+      CrashReporter.writeRaw(reactContext, kind != null ? kind : "JS", where, body);
+      promise.resolve(true);
+    } catch (Exception e) {
+      promise.reject("CRASH_WRITE", e);
+    }
+  }
+
+  /**
+   * 同步写入：JS fatal 时 bridge 可能马上断，Promise 来不及回调。
+   * 必须用 blocking sync 才能尽量落盘成功。
+   */
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public boolean writeCrashReportSync(String kind, String where, String body) {
+    try {
+      CrashReporter.writeRaw(reactContext, kind != null ? kind : "JS", where, body);
+      return true;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
   @ReactMethod
   public void addListener(String eventName) {
     if (listenerCount == 0) {

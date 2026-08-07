@@ -10,6 +10,7 @@ import com.reactnativenavigation.react.NavigationReactNativeHost;
 
 import java.util.List;
 
+import com.ikunshare.chat.mobile.utils.CrashReporter;
 import com.ikunshare.chat.mobile.utils.UtilsPackage;
 
 public class MainApplication extends NavigationApplication {
@@ -51,6 +52,8 @@ public class MainApplication extends NavigationApplication {
 
   @Override
   public void onCreate() {
+    // 尽早安装，捕获后续初始化阶段的 Java 未捕获异常
+    CrashReporter.install(this);
     super.onCreate();
 
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
