@@ -32,6 +32,7 @@ const IconButton = ({
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled }}
       hitSlop={{ top: hitSlop, bottom: hitSlop, left: hitSlop, right: hitSlop }}
       style={[{ opacity: disabled ? 0.4 : 1, padding: 4 }, style]}
     >

@@ -4,11 +4,8 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   Switch,
-  ActivityIndicator,
-  type KeyboardTypeOptions,
 } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import { useSetting } from '@/store/setting/hook'
@@ -19,6 +16,8 @@ import { useModels } from '@/store/model/hook'
 import { themeList } from '@/theme/themes'
 import { toast } from '@/utils/toast'
 import { normalizeBaseUrl } from '@/core/api'
+import ActionButton from '@/components/common/ActionButton'
+import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
 
 type Props = {
@@ -134,48 +133,6 @@ const Setting = (_props: Props) => {
     toast(`默认模型：${modelId}`)
   }, [])
 
-  const Field = ({
-    label,
-    value,
-    onChange,
-    placeholder,
-    secure,
-    multiline,
-    keyboardType,
-  }: {
-    label: string
-    value: string
-    onChange: (v: string) => void
-    placeholder?: string
-    secure?: boolean
-    multiline?: boolean
-    keyboardType?: KeyboardTypeOptions
-  }) => (
-    <View style={styles.field}>
-      <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
-      <TextInput
-        style={[
-          styles.input,
-          multiline && styles.inputMulti,
-          {
-            backgroundColor: colors.inputBg,
-            color: colors.text,
-            borderColor: colors.border,
-          },
-        ]}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textSecondary}
-        secureTextEntry={secure}
-        autoCapitalize="none"
-        autoCorrect={false}
-        multiline={multiline}
-        keyboardType={keyboardType}
-      />
-    </View>
-  )
-
   return (
     <ScrollView
       style={[styles.root, { backgroundColor: colors.background }]}
@@ -195,37 +152,22 @@ const Setting = (_props: Props) => {
             </Text>
           </View>
         </View>
-        <Field
+        <FormField
           label="API URL"
           value={baseUrl}
           onChange={setBaseUrl}
           placeholder="https://api.example.com 或 .../v1"
           keyboardType="url"
+          helper="支持填主机或带 /v1 的地址，将自动规范化"
         />
-        <Text style={[styles.hint, { color: colors.textSecondary }]}>
-          支持填主机或带 /v1 的地址，将自动规范化
-        </Text>
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>API Key</Text>
-          <View
-            style={[
-              styles.inputRow,
-              {
-                backgroundColor: colors.inputBg,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <TextInput
-              style={[styles.inputInline, { color: colors.text }]}
-              value={apiKey}
-              onChangeText={setApiKey}
-              placeholder="sk-..."
-              placeholderTextColor={colors.textSecondary}
-              secureTextEntry={!apiKeyVisible}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+        <FormField
+          label="API Key"
+          value={apiKey}
+          onChange={setApiKey}
+          placeholder="sk-..."
+          secureTextEntry={!apiKeyVisible}
+          accessibilityLabel="API Key"
+          rightAccessory={
             <IconButton
               name={apiKeyVisible ? 'eye-off' : 'eye'}
               color={colors.primary}
@@ -234,9 +176,9 @@ const Setting = (_props: Props) => {
               accessibilityLabel={apiKeyVisible ? '隐藏 API Key' : '显示 API Key'}
               onPress={() => setApiKeyVisible((v) => !v)}
             />
-          </View>
-        </View>
-        <Field
+          }
+        />
+        <FormField
           label="额外请求头 (JSON，可选)"
           value={extraHeaders}
           onChange={(v) => {
@@ -245,32 +187,23 @@ const Setting = (_props: Props) => {
           }}
           placeholder='{"X-Custom":"value"}'
           multiline
+          error={extraHeadersError}
         />
-        {extraHeadersError ? (
-          <Text style={[styles.errorText, { color: colors.error }]}>{extraHeadersError}</Text>
-        ) : null}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.btn, { backgroundColor: colors.primary }]}
+        <View style={styles.actionRow}>
+          <ActionButton
+            title="保存"
             onPress={saveApi}
-            accessibilityRole="button"
+            style={styles.flexButton}
             accessibilityLabel="保存 API 配置"
-          >
-            <Text style={styles.btnText}>保存</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, { backgroundColor: colors.primaryDark }]}
+          />
+          <ActionButton
+            title="测试并刷新模型"
             onPress={() => void testAndRefresh()}
             disabled={testing || loading}
-            accessibilityRole="button"
+            loading={testing || loading}
+            style={[styles.flexButton, { backgroundColor: colors.primaryDark }]}
             accessibilityLabel="测试连接并刷新模型"
-          >
-            {testing || loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.btnText}>测试并刷新模型</Text>
-            )}
-          </TouchableOpacity>
+          />
         </View>
         <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
           已缓存模型：{models.length} 个
@@ -294,6 +227,7 @@ const Setting = (_props: Props) => {
                     onPress={() => selectDefaultModel(item.id)}
                     accessibilityRole="button"
                     accessibilityLabel={selected ? `默认模型 ${item.id}` : `设为默认模型 ${item.id}`}
+                    accessibilityState={{ selected }}
                   >
                     <Text
                       style={{
@@ -319,20 +253,20 @@ const Setting = (_props: Props) => {
 
       <Text style={[styles.section, { color: colors.text }]}>对话默认</Text>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Field
+        <FormField
           label="系统提示词"
           value={systemPrompt}
           onChange={setSystemPrompt}
           multiline
         />
-        <Field
+        <FormField
           label="Temperature"
           value={temperature}
           onChange={setTemperature}
           placeholder="0.7"
           keyboardType="decimal-pad"
         />
-        <Field
+        <FormField
           label="Max Tokens（0 表示不限制）"
           value={maxTokens}
           onChange={setMaxTokens}
@@ -345,16 +279,17 @@ const Setting = (_props: Props) => {
             value={setting['chat.stream']}
             onValueChange={(v) => settingAction.updateSetting({ 'chat.stream': v })}
             trackColor={{ true: colors.primary }}
+            accessibilityRole="switch"
+            accessibilityLabel="流式输出"
+            accessibilityState={{ checked: setting['chat.stream'] }}
           />
         </View>
-        <TouchableOpacity
-          style={[styles.btn, { backgroundColor: colors.primary, alignSelf: 'flex-start' }]}
+        <ActionButton
+          title="保存对话设置"
           onPress={saveChat}
-          accessibilityRole="button"
+          style={{ alignSelf: 'flex-start' }}
           accessibilityLabel="保存对话设置"
-        >
-          <Text style={styles.btnText}>保存对话设置</Text>
-        </TouchableOpacity>
+        />
       </View>
 
       <Text style={[styles.section, { color: colors.text }]}>外观</Text>
@@ -377,6 +312,7 @@ const Setting = (_props: Props) => {
               }}
               accessibilityRole="button"
               accessibilityLabel={`切换主题 ${t.name}`}
+              accessibilityState={{ selected: setting['theme.id'] === t.id }}
             >
               <Text
                 style={{
@@ -411,6 +347,7 @@ const Setting = (_props: Props) => {
               }}
               accessibilityRole="button"
               accessibilityLabel={`设置字号 ${size}`}
+              accessibilityState={{ selected: setting['common.fontSize'] === size }}
             >
               <Text
                 style={{
@@ -445,7 +382,6 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
   },
-  field: { marginBottom: 10 },
   label: { fontSize: 13, marginBottom: 6 },
   hint: { fontSize: 12, marginBottom: 8 },
   statusRow: {
@@ -464,37 +400,8 @@ const styles = StyleSheet.create({
   },
   statusTextWrap: { flex: 1 },
   statusTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-  },
-  inputInline: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-  inputMulti: { minHeight: 72, textAlignVertical: 'top' },
-  errorText: { fontSize: 12, marginTop: -4, marginBottom: 8 },
-  row: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  btn: {
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 88,
-  },
-  btnText: { color: '#fff', fontWeight: '700' },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  flexButton: { flex: 1 },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',

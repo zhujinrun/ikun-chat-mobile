@@ -35,6 +35,9 @@ import MarkdownContent from '@/components/chat/MarkdownContent'
 import Icon from '@/components/common/Icon'
 import IconButton from '@/components/common/IconButton'
 import ThinkingIndicator from '@/components/common/ThinkingIndicator'
+import ActionButton from '@/components/common/ActionButton'
+import AppModal from '@/components/common/AppModal'
+import FormField from '@/components/common/FormField'
 
 type Props = {
   componentId: string
@@ -593,6 +596,7 @@ const Home = ({ componentId }: Props) => {
           onPress={() => setModelPickerOpen(true)}
           accessibilityLabel="选择模型"
           accessibilityRole="button"
+          accessibilityState={{ expanded: modelPickerOpen }}
         >
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {active?.title || 'IKUN Chat'}
@@ -710,6 +714,7 @@ const Home = ({ componentId }: Props) => {
               disabled={!input.trim()}
               accessibilityLabel="发送"
               accessibilityRole="button"
+              accessibilityState={{ disabled: !input.trim() }}
             >
               <Icon name="send" size={18} color="#fff" />
             </TouchableOpacity>
@@ -786,6 +791,7 @@ const Home = ({ componentId }: Props) => {
                   onPress={() => void handleSelectChat(item.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`切换到会话 ${item.title}`}
+                  accessibilityState={{ selected: item.id === activeId }}
                   onLongPress={() => {
                     Alert.alert(item.title, undefined, [
                       { text: '取消', style: 'cancel' },
@@ -836,345 +842,223 @@ const Home = ({ componentId }: Props) => {
         </Pressable>
       </Modal>
 
-      <Modal
+      <AppModal
         visible={modelPickerOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setModelPickerOpen(false)}
+        title="选择模型"
+        placement="bottom"
+        onClose={() => setModelPickerOpen(false)}
       >
-        <Pressable style={styles.modalMaskCol} onPress={() => setModelPickerOpen(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: colors.surface }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>选择模型</Text>
-              <IconButton
-                name="close"
-                accessibilityLabel="关闭"
-                color={colors.textSecondary}
-                size={22}
-                onPress={() => setModelPickerOpen(false)}
-              />
-            </View>
-            <View
-              style={[
-                styles.drawerSearch,
-                { backgroundColor: colors.inputBg, borderColor: colors.border },
-              ]}
-            >
-              <Icon name="search" size={16} color={colors.textSecondary} />
-              <TextInput
-                style={[styles.drawerSearchInput, { color: colors.text }]}
-                value={modelQuery}
-                onChangeText={setModelQuery}
-                placeholder="搜索模型…"
-                placeholderTextColor={colors.textSecondary}
-                autoCorrect={false}
-                accessibilityLabel="搜索模型"
-              />
-              {modelQuery ? (
-                <IconButton
-                  name="close"
-                  accessibilityLabel="清空模型搜索"
-                  color={colors.textSecondary}
-                  size={16}
-                  hitSlop={8}
-                  onPress={() => setModelQuery('')}
-                />
-              ) : null}
-            </View>
-            <FlatList
-              data={filteredModels}
-              keyExtractor={(item) => item.id}
-              style={{ maxHeight: 360 }}
-              renderItem={({ item }) => {
-                const selected = item.id === currentModel
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.modelItem,
-                      selected && { backgroundColor: colors.surfaceSecondary },
-                    ]}
-                    onPress={() => void handleSelectModel(item.id)}
-                    accessibilityLabel={selected ? `已选 ${item.id}` : item.id}
-                    accessibilityRole="button"
-                  >
-                    <Icon
-                      name="model"
-                      size={18}
-                      color={selected ? colors.primary : colors.textSecondary}
-                    />
-                    <Text
-                      style={{
-                        color: colors.text,
-                        flex: 1,
-                        marginLeft: 10,
-                        fontWeight: selected ? '700' : '400',
-                      }}
-                      numberOfLines={1}
-                    >
-                      {item.id}
-                    </Text>
-                    {selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
-                  </TouchableOpacity>
-                )
-              }}
-              ListEmptyComponent={
-                <Text style={{ color: colors.textSecondary, padding: 12 }}>
-                  {modelQuery ? '未找到匹配模型' : '暂无模型，请先在设置中测试连接并刷新模型'}
-                </Text>
-              }
+        <View
+          style={[
+            styles.drawerSearch,
+            { backgroundColor: colors.inputBg, borderColor: colors.border },
+          ]}
+        >
+          <Icon name="search" size={16} color={colors.textSecondary} />
+          <TextInput
+            style={[styles.drawerSearchInput, { color: colors.text }]}
+            value={modelQuery}
+            onChangeText={setModelQuery}
+            placeholder="搜索模型…"
+            placeholderTextColor={colors.textSecondary}
+            autoCorrect={false}
+            accessibilityLabel="搜索模型"
+          />
+          {modelQuery ? (
+            <IconButton
+              name="close"
+              accessibilityLabel="清空模型搜索"
+              color={colors.textSecondary}
+              size={16}
+              hitSlop={8}
+              onPress={() => setModelQuery('')}
             />
-          </Pressable>
-        </Pressable>
-      </Modal>
+          ) : null}
+        </View>
+        <FlatList
+          data={filteredModels}
+          keyExtractor={(item) => item.id}
+          style={{ maxHeight: 360 }}
+          renderItem={({ item }) => {
+            const selected = item.id === currentModel
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.modelItem,
+                  selected && { backgroundColor: colors.surfaceSecondary },
+                ]}
+                onPress={() => void handleSelectModel(item.id)}
+                accessibilityLabel={selected ? `已选 ${item.id}` : item.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+              >
+                <Icon
+                  name="model"
+                  size={18}
+                  color={selected ? colors.primary : colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    color: colors.text,
+                    flex: 1,
+                    marginLeft: 10,
+                    fontWeight: selected ? '700' : '400',
+                  }}
+                  numberOfLines={1}
+                >
+                  {item.id}
+                </Text>
+                {selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
+              </TouchableOpacity>
+            )
+          }}
+          ListEmptyComponent={
+            <Text style={{ color: colors.textSecondary, padding: 12 }}>
+              {modelQuery ? '未找到匹配模型' : '暂无模型，请先在设置中测试连接并刷新模型'}
+            </Text>
+          }
+        />
+      </AppModal>
 
       {/* 输入区「+」菜单：次要能力（图标+文字） */}
-      <Modal
+      <AppModal
         visible={attachMenuOpen}
+        title="更多"
+        placement="bottom"
         animationType="fade"
-        transparent
-        onRequestClose={() => setAttachMenuOpen(false)}
+        onClose={() => setAttachMenuOpen(false)}
       >
-        <Pressable style={styles.modalMaskCol} onPress={() => setAttachMenuOpen(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: colors.surface }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>更多</Text>
-              <IconButton
-                name="close"
-                accessibilityLabel="关闭"
-                color={colors.textSecondary}
-                size={22}
-                onPress={() => setAttachMenuOpen(false)}
-              />
-            </View>
-            <TouchableOpacity
-              style={styles.menuRow}
-              onPress={() => {
-                setAttachMenuOpen(false)
-                void openPromptModal()
-              }}
-              accessibilityLabel="会话提示词"
-              accessibilityRole="button"
-            >
-              <Icon
-                name="prompt"
-                size={20}
-                color={hasConvPrompt ? colors.primary : colors.textSecondary}
-              />
-              <View style={styles.menuRowText}>
-                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
-                  会话提示词
-                </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                  {hasConvPrompt ? '已设置本会话覆盖' : '使用全局默认，可在此覆盖'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <TouchableOpacity
+          style={styles.menuRow}
+          onPress={() => {
+            setAttachMenuOpen(false)
+            void openPromptModal()
+          }}
+          accessibilityLabel="会话提示词"
+          accessibilityRole="button"
+          accessibilityState={{ selected: hasConvPrompt }}
+        >
+          <Icon
+            name="prompt"
+            size={20}
+            color={hasConvPrompt ? colors.primary : colors.textSecondary}
+          />
+          <View style={styles.menuRowText}>
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+              会话提示词
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {hasConvPrompt ? '已设置本会话覆盖' : '使用全局默认，可在此覆盖'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </AppModal>
 
-      <Modal
+      <AppModal
         visible={!!renameTarget}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setRenameTarget(null)}
+        title="重命名会话"
+        onClose={() => setRenameTarget(null)}
       >
-        <Pressable style={styles.renameMask} onPress={() => setRenameTarget(null)}>
-          <Pressable
-            style={[styles.renameBox, { backgroundColor: colors.surface }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>重命名会话</Text>
-              <IconButton
-                name="close"
-                accessibilityLabel="关闭"
-                color={colors.textSecondary}
-                size={22}
-                onPress={() => setRenameTarget(null)}
-              />
-            </View>
-            <TextInput
-              style={[
-                styles.input,
-                styles.renameInput,
-                {
-                  backgroundColor: colors.inputBg,
-                  color: colors.text,
-                  borderColor: colors.border,
-                },
-              ]}
-              value={renameText}
-              onChangeText={setRenameText}
-              autoFocus
-              accessibilityLabel="会话名称"
-            />
-            <View style={styles.renameActions}>
-              <TouchableOpacity
-                style={styles.renameActionBtn}
-                onPress={() => setRenameTarget(null)}
-                accessibilityRole="button"
-                accessibilityLabel="取消重命名"
-              >
-                <Text style={[styles.renameActionText, { color: colors.textSecondary }]}>取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.renameActionBtn}
-                onPress={confirmRename}
-                accessibilityRole="button"
-                accessibilityLabel="保存会话名称"
-              >
-                <Text
-                  style={[styles.renameActionText, { color: colors.primary, fontWeight: '700' }]}
-                >
-                  保存
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <FormField
+          value={renameText}
+          onChange={setRenameText}
+          autoFocus
+          accessibilityLabel="会话名称"
+          containerStyle={styles.modalField}
+        />
+        <View style={styles.modalActions}>
+          <ActionButton
+            title="取消"
+            variant="ghost"
+            compact
+            onPress={() => setRenameTarget(null)}
+            accessibilityLabel="取消重命名"
+          />
+          <ActionButton
+            title="保存"
+            compact
+            onPress={confirmRename}
+            accessibilityLabel="保存会话名称"
+          />
+        </View>
+      </AppModal>
 
       {/* 本会话系统提示词 */}
-      <Modal
+      <AppModal
         visible={promptModalOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPromptModalOpen(false)}
+        title="本会话系统提示词"
+        description="仅作用于当前会话；留空保存则使用设置里的全局默认。"
+        onClose={() => setPromptModalOpen(false)}
+        contentStyle={styles.largeModal}
       >
-        <Pressable style={styles.renameMask} onPress={() => setPromptModalOpen(false)}>
-          <Pressable
-            style={[styles.promptBox, { backgroundColor: colors.surface }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>本会话系统提示词</Text>
-              <IconButton
-                name="close"
-                accessibilityLabel="关闭"
-                color={colors.textSecondary}
-                size={22}
-                onPress={() => setPromptModalOpen(false)}
-              />
-            </View>
-            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
-              仅作用于当前会话；留空保存则使用设置里的全局默认。
-            </Text>
-            <TextInput
-              style={[
-                styles.promptInput,
-                {
-                  backgroundColor: colors.inputBg,
-                  color: colors.text,
-                  borderColor: colors.border,
-                  fontSize,
-                },
-              ]}
-              value={promptDraft}
-              onChangeText={setPromptDraft}
-              multiline
-              textAlignVertical="top"
-              placeholder="输入 system prompt…"
-              placeholderTextColor={colors.textSecondary}
-              accessibilityLabel="本会话系统提示词"
+        <FormField
+          value={promptDraft}
+          onChange={setPromptDraft}
+          multiline
+          placeholder="输入 system prompt…"
+          accessibilityLabel="本会话系统提示词"
+          inputContainerStyle={styles.promptFieldBox}
+          inputStyle={{ fontSize }}
+        />
+        <View style={styles.promptActions}>
+          <ActionButton
+            title="用全局默认"
+            variant="ghost"
+            compact
+            onPress={() => void clearPromptOverride()}
+            accessibilityLabel="使用全局默认提示词"
+          />
+          <View style={styles.modalActionsInline}>
+            <ActionButton
+              title="取消"
+              variant="ghost"
+              compact
+              onPress={() => setPromptModalOpen(false)}
+              accessibilityLabel="取消编辑提示词"
             />
-            <View style={styles.promptActions}>
-              <TouchableOpacity
-                onPress={() => void clearPromptOverride()}
-                accessibilityRole="button"
-                accessibilityLabel="使用全局默认提示词"
-              >
-                <Text style={{ color: colors.textSecondary }}>用全局默认</Text>
-              </TouchableOpacity>
-              <View style={{ flexDirection: 'row', gap: 16 }}>
-                <TouchableOpacity
-                  onPress={() => setPromptModalOpen(false)}
-                  accessibilityRole="button"
-                  accessibilityLabel="取消编辑提示词"
-                >
-                  <Text style={{ color: colors.textSecondary }}>取消</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => void savePrompt()}
-                  accessibilityRole="button"
-                  accessibilityLabel="保存提示词"
-                >
-                  <Text style={{ color: colors.primary, fontWeight: '700' }}>保存</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+            <ActionButton
+              title="保存"
+              compact
+              onPress={() => void savePrompt()}
+              accessibilityLabel="保存提示词"
+            />
+          </View>
+        </View>
+      </AppModal>
 
-      <Modal
+      <AppModal
         visible={!!editTarget}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditTarget(null)}
+        title="编辑并重发"
+        description="保存后将删除该消息之后的回复，并以新内容重新请求。"
+        onClose={() => setEditTarget(null)}
+        contentStyle={styles.largeModal}
       >
-        <Pressable style={styles.renameMask} onPress={() => setEditTarget(null)}>
-          <Pressable
-            style={[styles.promptBox, { backgroundColor: colors.surface }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>编辑并重发</Text>
-              <IconButton
-                name="close"
-                accessibilityLabel="关闭"
-                color={colors.textSecondary}
-                size={22}
-                onPress={() => setEditTarget(null)}
-              />
-            </View>
-            <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
-              保存后将删除该消息之后的回复，并以新内容重新请求。
-            </Text>
-            <TextInput
-              style={[
-                styles.promptInput,
-                {
-                  backgroundColor: colors.inputBg,
-                  color: colors.text,
-                  borderColor: colors.border,
-                  fontSize,
-                },
-              ]}
-              value={editDraft}
-              onChangeText={setEditDraft}
-              multiline
-              textAlignVertical="top"
-              autoFocus
-              placeholder="输入消息…"
-              placeholderTextColor={colors.textSecondary}
-              accessibilityLabel="编辑消息内容"
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16 }}>
-              <TouchableOpacity
-                onPress={() => setEditTarget(null)}
-                accessibilityRole="button"
-                accessibilityLabel="取消编辑消息"
-              >
-                <Text style={{ color: colors.textSecondary }}>取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => void confirmEditResend()}
-                accessibilityRole="button"
-                accessibilityLabel="发送编辑后的消息"
-              >
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>发送</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <FormField
+          value={editDraft}
+          onChange={setEditDraft}
+          multiline
+          autoFocus
+          placeholder="输入消息…"
+          accessibilityLabel="编辑消息内容"
+          inputContainerStyle={styles.promptFieldBox}
+          inputStyle={{ fontSize }}
+        />
+        <View style={styles.modalActions}>
+          <ActionButton
+            title="取消"
+            variant="ghost"
+            compact
+            onPress={() => setEditTarget(null)}
+            accessibilityLabel="取消编辑消息"
+          />
+          <ActionButton
+            title="发送"
+            compact
+            onPress={() => void confirmEditResend()}
+            accessibilityLabel="发送编辑后的消息"
+          />
+        </View>
+      </AppModal>
     </SafeAreaView>
   )
 }
@@ -1277,7 +1161,6 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
-  modalMaskCol: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
   drawer: {
     width: '78%',
     maxWidth: 320,
@@ -1352,66 +1235,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     gap: 12,
   },
-  menuRowDisabled: { opacity: 0.55 },
   menuRowText: { flex: 1 },
-  sheet: {
-    marginTop: 'auto',
-    width: '100%',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
-    paddingBottom: 32,
-  },
-  renameMask: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  renameBox: {
-    borderRadius: 14,
-    padding: 16,
-    width: '100%',
-    maxWidth: 360,
-    alignSelf: 'center',
-  },
-  renameInput: {
-    flex: 0,
-    width: '100%',
-    marginBottom: 12,
-  },
-  renameActions: {
+  modalField: { marginBottom: 12 },
+  modalActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 12,
-    paddingTop: 4,
   },
-  renameActionBtn: {
-    paddingHorizontal: 4,
-    paddingVertical: 6,
+  modalActionsInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  renameActionText: {
-    lineHeight: 20,
-  },
-  promptBox: {
-    borderRadius: 14,
-    padding: 16,
-    maxHeight: '80%',
-  },
-  promptInput: {
+  largeModal: { maxHeight: '82%' },
+  promptFieldBox: {
     minHeight: 140,
     maxHeight: 280,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
+    alignItems: 'flex-start',
   },
   promptActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
   },
 })
 
