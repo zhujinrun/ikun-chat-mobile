@@ -13,6 +13,7 @@ import settingAction from '@/store/setting/action'
 import themeAction from '@/store/theme/action'
 import modelAction from '@/store/model/action'
 import { useModels } from '@/store/model/hook'
+import { inferVisionCapability, visionCapabilityLabel } from '@/utils/modelCapability'
 import { themeList } from '@/theme/themes'
 import { toast } from '@/utils/toast'
 import { normalizeBaseUrl } from '@/core/api'
@@ -215,6 +216,18 @@ const Setting = (_props: Props) => {
             <View style={styles.themeRow}>
               {models.slice(0, 8).map((item) => {
                 const selected = item.id === setting['api.defaultModel']
+                const cap =
+                  item.supportedVision == null
+                    ? inferVisionCapability(item.id)
+                    : item.supportedVision
+                      ? 'vision'
+                      : 'text'
+                const capLabel = visionCapabilityLabel(cap)
+                const capColor = cap === 'vision'
+                  ? selected ? '#E9FFF4' : colors.success
+                  : cap === 'text'
+                    ? selected ? 'rgba(255,255,255,0.85)' : colors.textSecondary
+                    : selected ? 'rgba(255,255,255,0.9)' : '#B45309'
                 return (
                   <TouchableOpacity
                     key={item.id}
@@ -226,17 +239,32 @@ const Setting = (_props: Props) => {
                     ]}
                     onPress={() => selectDefaultModel(item.id)}
                     accessibilityRole="button"
-                    accessibilityLabel={selected ? `默认模型 ${item.id}` : `设为默认模型 ${item.id}`}
+                    accessibilityLabel={
+                      selected
+                        ? `默认模型 ${item.id}（${capLabel}）`
+                        : `设为默认模型 ${item.id}（${capLabel}）`
+                    }
                     accessibilityState={{ selected }}
                   >
                     <Text
                       style={{
                         color: selected ? '#fff' : colors.text,
                         fontWeight: selected ? '700' : '500',
+                        fontSize: 13,
                       }}
                       numberOfLines={1}
                     >
                       {item.id}
+                    </Text>
+                    <Text
+                      style={{
+                        color: capColor,
+                        fontSize: 10,
+                        marginTop: 1,
+                        opacity: 0.9,
+                      }}
+                    >
+                      {capLabel}
                     </Text>
                   </TouchableOpacity>
                 )

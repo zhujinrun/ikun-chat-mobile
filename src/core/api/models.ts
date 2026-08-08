@@ -1,5 +1,6 @@
 import { buildHeaders, getApiConfig, ApiError, parseErrorMessage } from './client'
 import type { ListModelsResponse } from './types'
+import { inferVisionCapability } from '@/utils/modelCapability'
 
 export const listModels = async (signal?: AbortSignal): Promise<LX.ModelInfo[]> => {
   const { baseUrl, apiKey, extraHeaders } = getApiConfig()
@@ -19,10 +20,14 @@ export const listModels = async (signal?: AbortSignal): Promise<LX.ModelInfo[]> 
   const data = (await res.json()) as ListModelsResponse
   if (data.error?.message) throw new ApiError(data.error.message)
 
-  const list = (data.data || []).map((item) => ({
-    id: item.id,
-    ownedBy: item.owned_by,
-  }))
+  const list = (data.data || []).map((item) => {
+    const vision = inferVisionCapability(item.id)
+    return {
+      id: item.id,
+      ownedBy: item.owned_by,
+      supportedVision: vision === 'unknown' ? null : vision === 'vision',
+    }
+  })
 
   list.sort((a, b) => a.id.localeCompare(b.id))
   return list

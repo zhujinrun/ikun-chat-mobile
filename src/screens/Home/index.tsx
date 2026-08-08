@@ -42,6 +42,11 @@ import AppModal from '@/components/common/AppModal'
 import FormField from '@/components/common/FormField'
 import { createId } from '@/utils/id'
 import { copyImageToClipboard } from '@/utils/nativeModules/utils'
+import {
+  inferVisionCapability,
+  visionCapabilityLabel,
+  type VisionCapability,
+} from '@/utils/modelCapability'
 
 type Props = {
   componentId: string
@@ -145,6 +150,9 @@ const Home = ({ componentId }: Props) => {
   }, [modelQuery, models])
 
   const currentModel = active?.model || defaultModel || '未选择模型'
+  const currentModelId = active?.model || defaultModel || ''
+  /** 当前模型图片能力（用于标记与发送前提示） */
+  const currentVision = inferVisionCapability(currentModelId)
   const needSetup = !apiUrl || !apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
   const colors = theme.colors
@@ -243,20 +251,44 @@ const Home = ({ componentId }: Props) => {
     setPendingAttachments((prev) => prev.filter((item) => item.id !== id))
   }, [])
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(() => {
     if ((!input.trim() && !pendingAttachments.length) || streaming) return
     if (!ensureReady()) return
-    const text = input
+    const text = input.trim()
     const attachments = pendingAttachments
-    setInput('')
-    setPendingAttachments([])
-    try {
-      await chatAction.send(text, attachments)
-      scrollToEnd()
-    } catch (err: any) {
-      toast(err?.message || '发送失败')
+
+    const doSend = async () => {
+      // 确认发送后才清空输入区，避免取消时丢失草稿
+      setInput('')
+      setPendingAttachments([])
+      try {
+        await chatAction.send(text, attachments)
+        scrollToEnd()
+      } catch (err: any) {
+        toast(err?.message || '发送失败')
+      }
     }
-  }, [input, pendingAttachments, streaming, ensureReady, scrollToEnd])
+
+    // 有图时，在发送前给出能力提示，避免选了仅文本模型后才报错
+    if (attachments.length) {
+      const cap = inferVisionCapability(active?.model || defaultModel || '')
+      if (cap === 'text') {
+        Alert.alert(
+          '仅文本模型',
+          `当前模型「${active?.model || defaultModel}」通常不支持图片输入，发送图片后可能报错。仍要发送吗？`,
+          [
+            { text: '取消', style: 'cancel' },
+            { text: '仍然发送', style: 'destructive', onPress: () => void doSend() },
+          ]
+        )
+        return
+      }
+      if (cap === 'unknown') {
+        toast('当前模型图片能力未知，若不支持将返回错误提示')
+      }
+    }
+    void doSend()
+  }, [input, pendingAttachments, streaming, ensureReady, active?.model, defaultModel, scrollToEnd])
 
   const handleStop = useCallback(() => {
     chatAction.stop()
@@ -271,8 +303,16 @@ const Home = ({ componentId }: Props) => {
       setModelQuery('')
       setModelPickerOpen(false)
       toast(`已切换：${modelId}`)
+      if (pendingAttachments.length) {
+        const cap = inferVisionCapability(modelId)
+        if (cap === 'text') {
+          toast('该模型通常为仅文本，当前待发送图片可能不受支持')
+        } else if (cap === 'unknown') {
+          toast('该模型图片能力未知，可能不支持图片输入')
+        }
+      }
     },
-    [activeId]
+    [activeId, pendingAttachments.length]
   )
 
   const handleCopy = useCallback((content: string) => {
@@ -354,14 +394,39 @@ const Home = ({ componentId }: Props) => {
       return
     }
     if (!ensureReady()) return
-    setEditTarget(null)
-    try {
-      await chatAction.resendFrom(target.id, text, editAttachments)
-      scrollToEnd()
-    } catch (err: any) {
-      toast(err?.message || '重新发送失败')
+    if (editAttachments.length) {
+      const cap = inferVisionCapability(active?.model || defaultModel || '')
+      if (cap === 'text') {
+        Alert.alert(
+          '仅文本模型',
+          `当前模型「${active?.model || defaultModel || ''}」通常不支持图片，发送后可能报错。仍要发送吗？`,
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '仍然发送',
+              style: 'destructive',
+              onPress: () => void doEditResend(),
+            },
+          ]
+        )
+        return
+      }
+      if (cap === 'unknown') {
+        toast('当前模型图片能力未知，若不支持将返回错误提示')
+      }
     }
-  }, [editTarget, editDraft, editAttachments, ensureReady, scrollToEnd])
+    void doEditResend()
+
+    async function doEditResend() {
+      setEditTarget(null)
+      try {
+        await chatAction.resendFrom(target.id, text, editAttachments)
+        scrollToEnd()
+      } catch (err: any) {
+        toast(err?.message || '重新发送失败')
+      }
+    }
+  }, [editTarget, editDraft, editAttachments, ensureReady, active?.model, defaultModel, scrollToEnd])
 
   /** 编辑弹窗内移除某张原图附件 */
   const removeEditAttachment = useCallback((id: string) => {
@@ -878,7 +943,11 @@ const Home = ({ componentId }: Props) => {
               ))}
             </View>
             <Text style={[styles.pendingHint, { color: colors.textSecondary }]}>
-              请确认当前模型支持图片理解；不支持时会返回兼容错误提示。
+              {currentVision === 'vision'
+                ? `已选图片 · ${visionCapabilityLabel(currentVision)}模型（${currentModel}）支持图片输入`
+                : currentVision === 'text'
+                  ? `已选图片 · 当前模型「${currentModel}」为仅文本，发送时可能不支持`
+                  : `已选图片 · 模型「${currentModel}」图片能力未知，发送时可能提示不支持`}
             </Text>
           </View>
         ) : null}
@@ -1101,6 +1170,12 @@ const Home = ({ componentId }: Props) => {
           style={{ maxHeight: 360 }}
           renderItem={({ item }) => {
             const selected = item.id === currentModel
+            const cap: VisionCapability =
+              item.supportedVision == null
+                ? inferVisionCapability(item.id)
+                : item.supportedVision
+                  ? 'vision'
+                  : 'text'
             return (
               <TouchableOpacity
                 style={[
@@ -1108,7 +1183,9 @@ const Home = ({ componentId }: Props) => {
                   selected && { backgroundColor: colors.surfaceSecondary },
                 ]}
                 onPress={() => void handleSelectModel(item.id)}
-                accessibilityLabel={selected ? `已选 ${item.id}` : item.id}
+                accessibilityLabel={
+                  selected ? `已选 ${item.id}（${visionCapabilityLabel(cap)}）` : `${item.id}（${visionCapabilityLabel(cap)}）`
+                }
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
               >
@@ -1127,6 +1204,20 @@ const Home = ({ componentId }: Props) => {
                   numberOfLines={1}
                 >
                   {item.id}
+                </Text>
+                <Text
+                  style={{
+                    color:
+                      cap === 'vision'
+                        ? colors.success
+                        : cap === 'text'
+                          ? colors.textSecondary
+                          : '#B45309',
+                    fontSize: 11,
+                    marginRight: 8,
+                  }}
+                >
+                  {visionCapabilityLabel(cap)}
                 </Text>
                 {selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
               </TouchableOpacity>

@@ -53,6 +53,8 @@ declare global {
     type ModelInfo = {
       id: string
       ownedBy?: string
+      /** 是否支持图片输入：true/false 已知，null|undefined 未知 */
+      supportedVision?: boolean | null
     }
 
     type ThemeColors = {
