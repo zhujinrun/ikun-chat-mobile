@@ -41,7 +41,7 @@ import ActionButton from '@/components/common/ActionButton'
 import AppModal from '@/components/common/AppModal'
 import FormField from '@/components/common/FormField'
 import { createId } from '@/utils/id'
-import { copyImageToClipboard } from '@/utils/nativeModules/utils'
+import { copyImageToClipboard, cacheImageTo, deleteLocalFiles } from '@/utils/nativeModules/utils'
 import {
   inferVisionCapability,
   visionCapabilityLabel,
@@ -75,12 +75,29 @@ const formatConversationTime = (ts?: number) => {
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
-const buildImageAttachment = (asset: Asset): LX.ChatAttachment | null => {
+const buildImageAttachment = async (asset: Asset): Promise<LX.ChatAttachment | null> => {
   const mimeType = asset.type || 'image/jpeg'
   const dataUrl = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : undefined
-  const uri = asset.uri || dataUrl
+  const sourceUri = asset.uri
   const size = asset.fileSize ?? (asset.base64 ? Math.ceil((asset.base64.length * 3) / 4) : 0)
-  if (!uri || !dataUrl || size > MAX_IMAGE_BYTES) return null
+  if (!sourceUri && !dataUrl) return null
+  if (size > MAX_IMAGE_BYTES) return null
+
+  let uri = sourceUri || dataUrl || ''
+  let remainDataUrl: string | undefined
+  if (sourceUri && /^(?:file|content):/.test(sourceUri)) {
+    const cached = await cacheImageTo(sourceUri)
+    if (cached) {
+      // 已拷贝到本地缓存目录，只存 URI + 元数据，不再把 base64 写入消息存储
+      uri = cached
+    } else {
+      remainDataUrl = dataUrl
+    }
+  } else {
+    remainDataUrl = dataUrl
+  }
+  if (!uri) return null
+
   return {
     id: createId('att_'),
     type: 'image',
@@ -90,7 +107,7 @@ const buildImageAttachment = (asset: Asset): LX.ChatAttachment | null => {
     size,
     width: asset.width,
     height: asset.height,
-    dataUrl,
+    ...(remainDataUrl ? { dataUrl: remainDataUrl } : {}),
   }
 }
 
@@ -234,9 +251,9 @@ const Home = ({ componentId }: Props) => {
         toast(response.errorMessage)
         return
       }
-      const picked = (response.assets || [])
-        .map(buildImageAttachment)
-        .filter((item): item is LX.ChatAttachment => !!item)
+      const picked = (await Promise.all((response.assets || []).map(buildImageAttachment))).filter(
+        (item): item is LX.ChatAttachment => !!item
+      )
       if (!picked.length) {
         toast(`图片需小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB`)
         return
@@ -248,8 +265,17 @@ const Home = ({ componentId }: Props) => {
   }, [pendingAttachments.length, streaming])
 
   const removePendingAttachment = useCallback((id: string) => {
+    const removed = pendingAttachments.find((item) => item.id === id)
+    if (removed?.uri) void deleteLocalFiles([removed.uri])
     setPendingAttachments((prev) => prev.filter((item) => item.id !== id))
-  }, [])
+  }, [pendingAttachments])
+
+  const clearPendingAttachments = useCallback(() => {
+    if (pendingAttachments.length) {
+      void deleteLocalFiles(pendingAttachments.map((item) => item.uri))
+    }
+    setPendingAttachments([])
+  }, [pendingAttachments])
 
   const handleSend = useCallback(() => {
     if ((!input.trim() && !pendingAttachments.length) || streaming) return
@@ -912,7 +938,7 @@ const Home = ({ componentId }: Props) => {
                 accessibilityLabel="清空待发送图片"
                 color={colors.textSecondary}
                 size={16}
-                onPress={() => setPendingAttachments([])}
+                onPress={clearPendingAttachments}
               />
             </View>
             <View style={styles.pendingGrid}>

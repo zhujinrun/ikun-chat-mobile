@@ -32,12 +32,17 @@ declare global {
     type ChatAttachment = {
       id: string
       type: ChatAttachmentType
+      /** 本地缓存 file:// 路径（首选）；兼容旧的 content:// / data: 地址 */
       uri: string
       mimeType: string
       name?: string
       size?: number
       width?: number
       height?: number
+      /**
+       * 兼容旧数据/失败兜底：base64 data URL。
+       * 新消息在选取时已拷贝到本地缓存目录，不再把 base64 写进 AsyncStorage。
+       */
       dataUrl?: string
     }
 

@@ -28,6 +28,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeArray;
@@ -310,6 +311,106 @@ public class UtilsModule extends ReactContextBaseJavaModule {
         promise.reject("COPY_IMAGE", e.getMessage() != null ? e.getMessage() : "复制失败");
       }
     }).start();
+  }
+
+  /**
+   * 把图片（file:// / content:// / data:）拷贝到应用内部 cache/attachments 目录，返回绝对路径。
+   * 消息只保存该 file:// 路径与元数据，不再把 base64 一并写入 AsyncStorage。
+   */
+  @ReactMethod
+  public void cacheImageTo(String uriStr, Promise promise) {
+    new Thread(() -> {
+      try {
+        if (uriStr == null || uriStr.isEmpty()) {
+          promise.reject("EMPTY_URI", "图片地址为空");
+          return;
+        }
+        byte[] bytes = readUri(Uri.parse(uriStr));
+        if (bytes == null || bytes.length == 0) {
+          promise.reject("READ_FAILED", "读取图片失败");
+          return;
+        }
+        String mime = detectImageMime(bytes);
+        String ext = mime.contains("png") ? ".png" : mime.contains("webp") ? ".webp" : ".jpg";
+        File dir = new File(reactContext.getCacheDir(), "attachments");
+        if (!dir.exists() && !dir.mkdirs()) {
+          promise.reject("MKDIR_FAILED", "无法创建缓存目录");
+          return;
+        }
+        File file = new File(
+          dir,
+          "image_" + System.currentTimeMillis() + "_" + (int) (Math.random() * 100000) + ext
+        );
+        FileOutputStream fos = new FileOutputStream(file);
+        fos.write(bytes);
+        fos.flush();
+        fos.close();
+        promise.resolve(file.getAbsolutePath());
+      } catch (Exception e) {
+        Log.e("Utils", "cacheImageTo error", e);
+        promise.reject("CACHE_IMAGE", e.getMessage() != null ? e.getMessage() : "缓存失败");
+      }
+    }).start();
+  }
+
+  /**
+   * 读取本地图片并返回 data: dataUrl（仅在发送/重发请求时临时生成，不落盘）。
+   */
+  @ReactMethod
+  public void readImageDataUrl(String uriStr, Promise promise) {
+    new Thread(() -> {
+      try {
+        if (uriStr == null || uriStr.isEmpty()) {
+          promise.reject("EMPTY_URI", "图片地址为空");
+          return;
+        }
+        byte[] bytes = readUri(Uri.parse(uriStr));
+        if (bytes == null || bytes.length == 0) {
+          promise.reject("READ_FAILED", "读取图片失败");
+          return;
+        }
+        String mime = detectImageMime(bytes);
+        String base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+        promise.resolve("data:" + mime + ";base64," + base64);
+      } catch (Exception e) {
+        Log.e("Utils", "readImageDataUrl error", e);
+        promise.reject("READ_IMAGE", e.getMessage() != null ? e.getMessage() : "读取图片失败");
+      }
+    }).start();
+  }
+
+  /** 尽力删除 file:// 本地缓存图片（消息/附件删除后的引用清理，失败忽略） */
+  @ReactMethod
+  public void deleteFiles(ReadableArray uris, Promise promise) {
+    new Thread(() -> {
+      int deleted = 0;
+      if (uris != null) {
+        for (int i = 0; i < uris.size(); i++) {
+          try {
+            String s = uris.getString(i);
+            if (s == null || s.isEmpty()) continue;
+            Uri uri = Uri.parse(s);
+            if (!"file".equalsIgnoreCase(uri.getScheme())) continue;
+            String path = uri.getPath();
+            if (path == null || path.isEmpty()) continue;
+            File f = new File(path);
+            if (!isManagedAttachmentFile(f)) continue;
+            if (f.exists() && f.delete()) deleted++;
+          } catch (Exception ignored) {
+            // 尽力删除，失败忽略
+          }
+        }
+      }
+      promise.resolve(deleted);
+    }).start();
+  }
+
+  private boolean isManagedAttachmentFile(File file) throws Exception {
+    File dir = new File(reactContext.getCacheDir(), "attachments").getCanonicalFile();
+    File target = file.getCanonicalFile();
+    String dirPath = dir.getPath();
+    String targetPath = target.getPath();
+    return targetPath.startsWith(dirPath + File.separator);
   }
 
   private byte[] readUri(Uri uri) throws Exception {
@@ -611,4 +712,3 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     }).start();
   }
 }
-

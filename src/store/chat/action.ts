@@ -1,29 +1,44 @@
 import { chatCompletionsStream } from '@/core/api'
 import type { ApiMessage, ApiMessageContentPart } from '@/core/api'
+import { readImageDataUrl } from '@/utils/nativeModules/utils'
 import conversationAction from '@/store/conversation/action'
 import conversationState from '@/store/conversation/state'
 import settingState from '@/store/setting/state'
 import state from './state'
 
-const buildUserContent = (message: LX.ChatMessage): ApiMessage['content'] => {
-  const imageAttachments =
-    message.attachments?.filter((item) => item.type === 'image' && item.dataUrl) || []
-  const text = message.content.trim()
-  if (!imageAttachments.length) return text
-
-  const parts: ApiMessageContentPart[] = []
-  if (text) parts.push({ type: 'text', text })
-  for (const attachment of imageAttachments) {
-    if (!attachment.dataUrl) continue
-    parts.push({
-      type: 'image_url',
-      image_url: { url: attachment.dataUrl, detail: 'auto' },
-    })
+/** 取一张图片附件的 dataUrl：优先旧数据里已存的 base64，否则从本地缓存文件实时读取 */
+const resolveAttachmentDataUrl = async (
+  attachment: LX.ChatAttachment
+): Promise<string> => {
+  const label = attachment.name ? `「${attachment.name}」` : '图片'
+  if (attachment.dataUrl) return attachment.dataUrl
+  if (attachment.uri && /^data:image\//.test(attachment.uri)) return attachment.uri
+  if (attachment.uri && /^(?:file|content):/.test(attachment.uri)) {
+    try {
+      return await readImageDataUrl(attachment.uri)
+    } catch (err: any) {
+      throw new Error(`${label}读取失败，请重新选择图片后再发送`)
+    }
   }
-  return parts.length ? parts : text
+  throw new Error(`${label}地址不可读取，请重新选择图片后再发送`)
 }
 
-const buildApiMessages = (conversationId: string): ApiMessage[] => {
+const buildUserContent = async (message: LX.ChatMessage): Promise<ApiMessage['content']> => {
+  const imageParts: ApiMessageContentPart[] = []
+  for (const attachment of message.attachments || []) {
+    if (attachment.type !== 'image') continue
+    const url = await resolveAttachmentDataUrl(attachment)
+    imageParts.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
+  }
+  const text = message.content.trim()
+  if (!imageParts.length) return text
+  const parts: ApiMessageContentPart[] = []
+  if (text) parts.push({ type: 'text', text })
+  parts.push(...imageParts)
+  return parts
+}
+
+const buildApiMessages = async (conversationId: string): Promise<ApiMessage[]> => {
   const conv = conversationState.conversations.find((c) => c.id === conversationId)
   const systemPrompt = conv?.systemPrompt || settingState.setting['chat.systemPrompt']
   const history = conversationAction.getMessages(conversationId).filter((m) => m.role !== 'error')
@@ -34,7 +49,7 @@ const buildApiMessages = (conversationId: string): ApiMessage[] => {
   }
   for (const m of history) {
     if (m.role === 'user') {
-      messages.push({ role: 'user', content: buildUserContent(m) })
+      messages.push({ role: 'user', content: await buildUserContent(m) })
     } else if (m.role === 'assistant') {
       messages.push({ role: 'assistant', content: m.content })
     }
@@ -68,7 +83,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   let failedMessage: string | null = null
   let hasImageInput = false
   try {
-    const messages = buildApiMessages(conv.id)
+    const messages = await buildApiMessages(conv.id)
     // 去掉刚插入的空 assistant，避免重复
     const apiMessages = messages.filter(
       (m, idx) => !(idx === messages.length - 1 && m.role === 'assistant' && !m.content)

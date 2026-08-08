@@ -1,6 +1,7 @@
 import { storageDataPrefix } from '@/config/constant'
 import { getData, removeData, saveData } from '@/plugins/storage'
 import { createId } from '@/utils/id'
+import { deleteLocalFiles } from '@/utils/nativeModules/utils'
 import settingState from '@/store/setting/state'
 import state from './state'
 
@@ -234,8 +235,13 @@ export default {
   },
 
   async remove(id: string) {
+    const removed = state.messages[id] || []
     state.conversations = state.conversations.filter((c) => c.id !== id)
     delete state.messages[id]
+    // 回收该会话已落盘的缓存图片文件
+    if (removed.flatMap((m) => m.attachments || []).length) {
+      void deleteLocalFiles(removed.flatMap((m) => (m.attachments || []).map((a) => a.uri)))
+    }
     await removeData(`${storageDataPrefix.messages}${id}`)
     if (state.activeId === id) {
       state.activeId = state.conversations[0]?.id || null
@@ -325,11 +331,16 @@ export default {
     if (!list) return
     const msg = list.find((m) => m.id === messageId)
     if (!msg) return
+    const oldUris = new Set((msg.attachments || []).map((a) => a.uri).filter(Boolean))
     if (attachments?.length) {
       msg.attachments = attachments
     } else {
       delete msg.attachments
     }
+    // 回收被移除附件的缓存文件（旧集合中不再被引用的）
+    const keepUris = new Set((attachments || []).map((a) => a.uri).filter(Boolean))
+    const orphan = [...oldUris].filter((u) => !keepUris.has(u))
+    if (orphan.length) void deleteLocalFiles(orphan)
     flushScheduledMessagesUpdated(conversationId)
     await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
@@ -352,7 +363,11 @@ export default {
     if (!list) return
     const idx = list.findIndex((m) => m.id === messageId)
     if (idx < 0) return
+    const removed = list[idx]
     list.splice(idx, 1)
+    if (removed.attachments?.length) {
+      void deleteLocalFiles(removed.attachments.map((a) => a.uri))
+    }
     await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
   },
@@ -367,6 +382,7 @@ export default {
     if (!list) return
     const msg = list.find((m) => m.id === messageId)
     if (!msg) return
+    const removed = (msg.attachments || []).find((a) => a.id === attachmentId)
     const rest = (msg.attachments || []).filter((a) => a.id !== attachmentId)
     if (msg.role === 'user' && rest.length === 0 && !msg.content.trim()) {
       return this.removeMessage(conversationId, messageId)
@@ -376,6 +392,7 @@ export default {
     } else {
       delete msg.attachments
     }
+    if (removed?.uri) void deleteLocalFiles([removed.uri])
     flushScheduledMessagesUpdated(conversationId)
     await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
@@ -385,19 +402,29 @@ export default {
   async trimMessagesTo(conversationId: string, keepUntilIndex: number) {
     const list = state.messages[conversationId]
     if (!list) return
+    let removed: LX.ChatMessage[] = []
     if (keepUntilIndex < 0) {
+      removed = list
       state.messages[conversationId] = []
     } else if (keepUntilIndex < list.length - 1) {
+      removed = list.slice(keepUntilIndex + 1)
       state.messages[conversationId] = list.slice(0, keepUntilIndex + 1)
     } else {
       return
+    }
+    if (removed.flatMap((m) => m.attachments || []).length) {
+      void deleteLocalFiles(removed.flatMap((m) => (m.attachments || []).map((a) => a.uri)))
     }
     await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
   },
 
   async clearMessages(conversationId: string) {
+    const removed = state.messages[conversationId] || []
     state.messages[conversationId] = []
+    if (removed.flatMap((m) => m.attachments || []).length) {
+      void deleteLocalFiles(removed.flatMap((m) => (m.attachments || []).map((a) => a.uri)))
+    }
     await writeMessagesToStorage(conversationId)
     global.state_event.messagesUpdated(conversationId)
   },
