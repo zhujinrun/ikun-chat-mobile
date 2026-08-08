@@ -66,11 +66,16 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
 
   let full = ''
   let failedMessage: string | null = null
+  let hasImageInput = false
   try {
     const messages = buildApiMessages(conv.id)
     // 去掉刚插入的空 assistant，避免重复
     const apiMessages = messages.filter(
       (m, idx) => !(idx === messages.length - 1 && m.role === 'assistant' && !m.content)
+    )
+    hasImageInput = apiMessages.some((message) =>
+      Array.isArray(message.content) &&
+        message.content.some((part) => part.type === 'image_url')
     )
 
     await chatCompletionsStream(
@@ -102,7 +107,8 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
         await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）', false)
       }
     } else {
-      const msg = err?.message || '请求失败'
+      const rawMsg = err?.message || '请求失败'
+      const msg = hasImageInput ? `${rawMsg}\n请确认当前模型支持图片输入。` : rawMsg
       failedMessage = msg
       if (full) {
         await conversationAction.updateMessageContent(

@@ -808,6 +808,9 @@ const Home = ({ componentId }: Props) => {
                 </View>
               ))}
             </View>
+            <Text style={[styles.pendingHint, { color: colors.textSecondary }]}>
+              请确认当前模型支持图片理解；不支持时会返回兼容错误提示。
+            </Text>
           </View>
         ) : null}
         <View
@@ -1338,6 +1341,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  pendingHint: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 6,
   },
   pendingItem: {
     width: 72,
