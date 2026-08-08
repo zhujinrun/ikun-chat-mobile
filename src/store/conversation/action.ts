@@ -65,7 +65,10 @@ const flushScheduledMessagesUpdated = (conversationId?: string) => {
 }
 
 const sortConversations = () => {
-  state.conversations.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  state.conversations.sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+    return (b.updatedAt || 0) - (a.updatedAt || 0)
+  })
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -84,6 +87,7 @@ const sanitizeConversations = (raw: unknown): LX.Conversation[] => {
       title: typeof item.title === 'string' && item.title ? item.title : '新对话',
       model: typeof item.model === 'string' ? item.model : '',
       systemPrompt: typeof item.systemPrompt === 'string' ? item.systemPrompt : undefined,
+      pinned: typeof item.pinned === 'boolean' ? item.pinned : false,
       createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
       updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
     })

@@ -20,6 +20,7 @@ declare global {
       title: string
       model: string
       systemPrompt?: string
+      pinned?: boolean
       createdAt: number
       updatedAt: number
     }

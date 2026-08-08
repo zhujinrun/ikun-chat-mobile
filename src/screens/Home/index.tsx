@@ -45,6 +45,20 @@ type EditTarget = {
   content: string
 }
 
+const formatConversationTime = (ts?: number) => {
+  if (!ts) return ''
+  const date = new Date(ts)
+  const now = new Date()
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  if (sameDay) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`
+}
+
 const Home = ({ componentId }: Props) => {
   const theme = useTheme()
   const conversations = useConversations()
@@ -60,7 +74,9 @@ const Home = ({ componentId }: Props) => {
   const globalSystemPrompt = useSettingValue('chat.systemPrompt')
 
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [conversationQuery, setConversationQuery] = useState('')
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [modelQuery, setModelQuery] = useState('')
   const [input, setInput] = useState('')
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
   const [renameText, setRenameText] = useState('')
@@ -76,6 +92,22 @@ const Home = ({ componentId }: Props) => {
     () => conversations.find((c) => c.id === activeId) || null,
     [conversations, activeId]
   )
+
+  const filteredConversations = useMemo(() => {
+    const query = conversationQuery.trim().toLowerCase()
+    if (!query) return conversations
+    return conversations.filter((item) =>
+      [item.title, item.model, item.systemPrompt]
+        .filter(Boolean)
+        .some((text) => String(text).toLowerCase().includes(query))
+      )
+  }, [conversationQuery, conversations])
+
+  const filteredModels = useMemo(() => {
+    const query = modelQuery.trim().toLowerCase()
+    if (!query) return models
+    return models.filter((item) => item.id.toLowerCase().includes(query))
+  }, [modelQuery, models])
 
   const currentModel = active?.model || defaultModel || '未选择模型'
   const needSetup = !apiUrl || !apiKey
@@ -97,6 +129,7 @@ const Home = ({ componentId }: Props) => {
 
   const handleNewChat = useCallback(async () => {
     await conversationAction.createConversation()
+    setConversationQuery('')
     setDrawerOpen(false)
   }, [])
 
@@ -116,6 +149,11 @@ const Home = ({ componentId }: Props) => {
         },
       },
     ])
+  }, [])
+
+  const handleTogglePinChat = useCallback(async (id: string, pinned?: boolean) => {
+    await conversationAction.updateConversation(id, { pinned: !pinned })
+    toast(pinned ? '已取消置顶' : '已置顶')
   }, [])
 
   const handleRenameChat = useCallback((id: string, title: string) => {
@@ -152,6 +190,7 @@ const Home = ({ componentId }: Props) => {
       if (activeId) {
         await conversationAction.updateConversation(activeId, { model: modelId })
       }
+      setModelQuery('')
       setModelPickerOpen(false)
       toast(`已切换：${modelId}`)
     },
@@ -440,6 +479,7 @@ const Home = ({ componentId }: Props) => {
                       style={styles.errorRetryBtn}
                       onPress={() => void handleRetry()}
                       accessibilityLabel="重试"
+                      accessibilityRole="button"
                     >
                       <Icon name="retry" size={16} color={textColor} />
                       <Text style={[styles.errorRetryText, { color: textColor }]}>重试</Text>
@@ -548,7 +588,12 @@ const Home = ({ componentId }: Props) => {
           style={styles.headerBtn}
           onPress={() => setDrawerOpen(true)}
         />
-        <TouchableOpacity style={styles.headerCenter} onPress={() => setModelPickerOpen(true)}>
+        <TouchableOpacity
+          style={styles.headerCenter}
+          onPress={() => setModelPickerOpen(true)}
+          accessibilityLabel="选择模型"
+          accessibilityRole="button"
+        >
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {active?.title || 'IKUN Chat'}
           </Text>
@@ -581,6 +626,7 @@ const Home = ({ componentId }: Props) => {
             style={styles.bannerActionRow}
             onPress={() => void navigations.pushSettingScreen(componentId)}
             accessibilityLabel="去设置"
+            accessibilityRole="button"
           >
             <Icon name="settings" size={14} color="#B45309" />
             <Text style={styles.bannerAction}>去设置</Text>
@@ -643,12 +689,14 @@ const Home = ({ componentId }: Props) => {
             multiline
             maxLength={20000}
             editable={!streaming}
+            accessibilityLabel="消息输入框"
           />
           {streaming ? (
             <TouchableOpacity
               style={[styles.sendBtn, { backgroundColor: colors.error }]}
               onPress={handleStop}
               accessibilityLabel="停止生成"
+              accessibilityRole="button"
             >
               <Icon name="stop" size={18} color="#fff" />
             </TouchableOpacity>
@@ -661,6 +709,7 @@ const Home = ({ componentId }: Props) => {
               onPress={() => void handleSend()}
               disabled={!input.trim()}
               accessibilityLabel="发送"
+              accessibilityRole="button"
             >
               <Icon name="send" size={18} color="#fff" />
             </TouchableOpacity>
@@ -693,12 +742,40 @@ const Home = ({ componentId }: Props) => {
               style={[styles.newChatBtn, { backgroundColor: colors.primary }]}
               onPress={() => void handleNewChat()}
               accessibilityLabel="新对话"
+              accessibilityRole="button"
             >
               <Icon name="add" size={20} color="#fff" />
               <Text style={styles.newChatText}>新对话</Text>
             </TouchableOpacity>
+            <View
+              style={[
+                styles.drawerSearch,
+                { backgroundColor: colors.inputBg, borderColor: colors.border },
+              ]}
+            >
+              <Icon name="search" size={16} color={colors.textSecondary} />
+              <TextInput
+                style={[styles.drawerSearchInput, { color: colors.text }]}
+                value={conversationQuery}
+                onChangeText={setConversationQuery}
+                placeholder="搜索会话、模型或提示词…"
+                placeholderTextColor={colors.textSecondary}
+                autoCorrect={false}
+                accessibilityLabel="搜索会话"
+              />
+              {conversationQuery ? (
+                <IconButton
+                  name="close"
+                  accessibilityLabel="清空搜索"
+                  color={colors.textSecondary}
+                  size={16}
+                  hitSlop={8}
+                  onPress={() => setConversationQuery('')}
+                />
+              ) : null}
+            </View>
             <FlatList
-              data={conversations}
+              data={filteredConversations}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity
@@ -707,9 +784,15 @@ const Home = ({ componentId }: Props) => {
                     item.id === activeId && { backgroundColor: colors.surfaceSecondary },
                   ]}
                   onPress={() => void handleSelectChat(item.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`切换到会话 ${item.title}`}
                   onLongPress={() => {
                     Alert.alert(item.title, undefined, [
                       { text: '取消', style: 'cancel' },
+                      {
+                        text: item.pinned ? '取消置顶' : '置顶',
+                        onPress: () => void handleTogglePinChat(item.id, item.pinned),
+                      },
                       {
                         text: '重命名',
                         onPress: () => handleRenameChat(item.id, item.title),
@@ -722,17 +805,31 @@ const Home = ({ componentId }: Props) => {
                     ])
                   }}
                 >
-                  <Text style={{ color: colors.text }} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
-                    {item.model || '默认模型'}
-                    {item.systemPrompt?.trim() ? ' · 自定义提示词' : ''}
-                  </Text>
+                  <View style={styles.convTitleRow}>
+                    <Text style={[styles.convTitle, { color: colors.text }]} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    {item.pinned ? <Icon name="pin" size={13} color={colors.primary} /> : null}
+                    <Text style={[styles.convTime, { color: colors.textSecondary }]}>
+                      {formatConversationTime(item.updatedAt)}
+                    </Text>
+                  </View>
+                  <View style={styles.convMetaRow}>
+                    <Icon name="model" size={12} color={colors.textSecondary} />
+                    <Text
+                      style={[styles.convMetaText, { color: colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {item.model || '默认模型'}
+                      {item.systemPrompt?.trim() ? ' · 自定义提示词' : ''}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
-                <Text style={{ color: colors.textSecondary, padding: 12 }}>暂无会话</Text>
+                <Text style={{ color: colors.textSecondary, padding: 12 }}>
+                  {conversationQuery ? '未找到匹配会话' : '暂无会话'}
+                </Text>
               }
             />
           </Pressable>
@@ -760,8 +857,35 @@ const Home = ({ componentId }: Props) => {
                 onPress={() => setModelPickerOpen(false)}
               />
             </View>
+            <View
+              style={[
+                styles.drawerSearch,
+                { backgroundColor: colors.inputBg, borderColor: colors.border },
+              ]}
+            >
+              <Icon name="search" size={16} color={colors.textSecondary} />
+              <TextInput
+                style={[styles.drawerSearchInput, { color: colors.text }]}
+                value={modelQuery}
+                onChangeText={setModelQuery}
+                placeholder="搜索模型…"
+                placeholderTextColor={colors.textSecondary}
+                autoCorrect={false}
+                accessibilityLabel="搜索模型"
+              />
+              {modelQuery ? (
+                <IconButton
+                  name="close"
+                  accessibilityLabel="清空模型搜索"
+                  color={colors.textSecondary}
+                  size={16}
+                  hitSlop={8}
+                  onPress={() => setModelQuery('')}
+                />
+              ) : null}
+            </View>
             <FlatList
-              data={models}
+              data={filteredModels}
               keyExtractor={(item) => item.id}
               style={{ maxHeight: 360 }}
               renderItem={({ item }) => {
@@ -774,6 +898,7 @@ const Home = ({ componentId }: Props) => {
                     ]}
                     onPress={() => void handleSelectModel(item.id)}
                     accessibilityLabel={selected ? `已选 ${item.id}` : item.id}
+                    accessibilityRole="button"
                   >
                     <Icon
                       name="model"
@@ -797,7 +922,7 @@ const Home = ({ componentId }: Props) => {
               }}
               ListEmptyComponent={
                 <Text style={{ color: colors.textSecondary, padding: 12 }}>
-                  暂无模型，请先在设置中测试连接并刷新模型
+                  {modelQuery ? '未找到匹配模型' : '暂无模型，请先在设置中测试连接并刷新模型'}
                 </Text>
               }
             />
@@ -834,6 +959,7 @@ const Home = ({ componentId }: Props) => {
                 void openPromptModal()
               }}
               accessibilityLabel="会话提示词"
+              accessibilityRole="button"
             >
               <Icon
                 name="prompt"
@@ -846,25 +972,6 @@ const Home = ({ componentId }: Props) => {
                 </Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
                   {hasConvPrompt ? '已设置本会话覆盖' : '使用全局默认，可在此覆盖'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-            {/* 上传图片：入口预留，能力尚未接入 */}
-            <TouchableOpacity
-              style={[styles.menuRow, styles.menuRowDisabled]}
-              disabled
-              accessibilityLabel="上传图片（即将支持）"
-              onPress={() => {
-                // TODO: 接入图片选择与多模态发送
-              }}
-            >
-              <Icon name="image" size={20} color={colors.textSecondary} />
-              <View style={styles.menuRowText}>
-                <Text style={{ color: colors.textSecondary, fontSize: 16, fontWeight: '600' }}>
-                  上传图片
-                </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                  即将支持
                 </Text>
               </View>
             </TouchableOpacity>
@@ -906,15 +1013,23 @@ const Home = ({ componentId }: Props) => {
               value={renameText}
               onChangeText={setRenameText}
               autoFocus
+              accessibilityLabel="会话名称"
             />
             <View style={styles.renameActions}>
               <TouchableOpacity
                 style={styles.renameActionBtn}
                 onPress={() => setRenameTarget(null)}
+                accessibilityRole="button"
+                accessibilityLabel="取消重命名"
               >
                 <Text style={[styles.renameActionText, { color: colors.textSecondary }]}>取消</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.renameActionBtn} onPress={confirmRename}>
+              <TouchableOpacity
+                style={styles.renameActionBtn}
+                onPress={confirmRename}
+                accessibilityRole="button"
+                accessibilityLabel="保存会话名称"
+              >
                 <Text
                   style={[styles.renameActionText, { color: colors.primary, fontWeight: '700' }]}
                 >
@@ -967,16 +1082,29 @@ const Home = ({ componentId }: Props) => {
               textAlignVertical="top"
               placeholder="输入 system prompt…"
               placeholderTextColor={colors.textSecondary}
+              accessibilityLabel="本会话系统提示词"
             />
             <View style={styles.promptActions}>
-              <TouchableOpacity onPress={() => void clearPromptOverride()}>
+              <TouchableOpacity
+                onPress={() => void clearPromptOverride()}
+                accessibilityRole="button"
+                accessibilityLabel="使用全局默认提示词"
+              >
                 <Text style={{ color: colors.textSecondary }}>用全局默认</Text>
               </TouchableOpacity>
               <View style={{ flexDirection: 'row', gap: 16 }}>
-                <TouchableOpacity onPress={() => setPromptModalOpen(false)}>
+                <TouchableOpacity
+                  onPress={() => setPromptModalOpen(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="取消编辑提示词"
+                >
                   <Text style={{ color: colors.textSecondary }}>取消</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => void savePrompt()}>
+                <TouchableOpacity
+                  onPress={() => void savePrompt()}
+                  accessibilityRole="button"
+                  accessibilityLabel="保存提示词"
+                >
                   <Text style={{ color: colors.primary, fontWeight: '700' }}>保存</Text>
                 </TouchableOpacity>
               </View>
@@ -1026,12 +1154,21 @@ const Home = ({ componentId }: Props) => {
               autoFocus
               placeholder="输入消息…"
               placeholderTextColor={colors.textSecondary}
+              accessibilityLabel="编辑消息内容"
             />
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16 }}>
-              <TouchableOpacity onPress={() => setEditTarget(null)}>
+              <TouchableOpacity
+                onPress={() => setEditTarget(null)}
+                accessibilityRole="button"
+                accessibilityLabel="取消编辑消息"
+              >
                 <Text style={{ color: colors.textSecondary }}>取消</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => void confirmEditResend()}>
+              <TouchableOpacity
+                onPress={() => void confirmEditResend()}
+                accessibilityRole="button"
+                accessibilityLabel="发送编辑后的消息"
+              >
                 <Text style={{ color: colors.primary, fontWeight: '700' }}>发送</Text>
               </TouchableOpacity>
             </View>
@@ -1165,12 +1302,41 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   newChatText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  drawerSearch: {
+    minHeight: 40,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  drawerSearchInput: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 14,
+  },
   convItem: {
     paddingVertical: 12,
     paddingHorizontal: 10,
     borderRadius: 8,
     marginBottom: 4,
   },
+  convTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  convTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
+  convTime: { fontSize: 11 },
+  convMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  convMetaText: { flex: 1, fontSize: 12 },
   modelItem: {
     flexDirection: 'row',
     alignItems: 'center',
