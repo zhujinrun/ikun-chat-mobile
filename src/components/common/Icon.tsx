@@ -22,7 +22,11 @@ export type AppIconName =
   | 'thinking'
   | 'chevron-down'
   | 'warning'
-  | 'image'
+  | 'pin'
+  | 'search'
+  | 'time'
+  | 'eye'
+  | 'eye-off'
 
 const ICON_MAP: Record<AppIconName, string> = {
   menu: 'menu-outline',
@@ -44,7 +48,11 @@ const ICON_MAP: Record<AppIconName, string> = {
   thinking: 'sync-outline',
   'chevron-down': 'chevron-down',
   warning: 'warning-outline',
-  image: 'image-outline',
+  pin: 'pin-outline',
+  search: 'search-outline',
+  time: 'time-outline',
+  eye: 'eye-outline',
+  'eye-off': 'eye-off-outline',
 }
 
 type Props = {
