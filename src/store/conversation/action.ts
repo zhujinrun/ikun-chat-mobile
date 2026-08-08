@@ -316,6 +316,25 @@ export default {
     }
   },
 
+  async updateMessageAttachments(
+    conversationId: string,
+    messageId: string,
+    attachments?: LX.ChatAttachment[]
+  ) {
+    const list = state.messages[conversationId]
+    if (!list) return
+    const msg = list.find((m) => m.id === messageId)
+    if (!msg) return
+    if (attachments?.length) {
+      msg.attachments = attachments
+    } else {
+      delete msg.attachments
+    }
+    flushScheduledMessagesUpdated(conversationId)
+    await writeMessagesToStorage(conversationId)
+    global.state_event.messagesUpdated(conversationId)
+  },
+
   /** 将某会话消息立刻持久化（流式结束后调用） */
   async flushMessages(conversationId: string) {
     if (!conversationId) return

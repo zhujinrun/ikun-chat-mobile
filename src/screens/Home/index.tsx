@@ -14,8 +14,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Share,
+  Image,
 } from 'react-native'
 import Clipboard from '@react-native-clipboard/clipboard'
+import { launchImageLibrary, type Asset } from 'react-native-image-picker'
 import { useTheme } from '@/store/theme/hook'
 import {
   useActiveConversationId,
@@ -38,6 +40,7 @@ import ThinkingIndicator from '@/components/common/ThinkingIndicator'
 import ActionButton from '@/components/common/ActionButton'
 import AppModal from '@/components/common/AppModal'
 import FormField from '@/components/common/FormField'
+import { createId } from '@/utils/id'
 
 type Props = {
   componentId: string
@@ -46,7 +49,11 @@ type Props = {
 type EditTarget = {
   id: string
   content: string
+  attachments?: LX.ChatAttachment[]
 }
+
+const MAX_IMAGE_ATTACHMENTS = 4
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
 const formatConversationTime = (ts?: number) => {
   if (!ts) return ''
@@ -60,6 +67,25 @@ const formatConversationTime = (ts?: number) => {
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
   }
   return `${date.getMonth() + 1}/${date.getDate()}`
+}
+
+const buildImageAttachment = (asset: Asset): LX.ChatAttachment | null => {
+  const mimeType = asset.type || 'image/jpeg'
+  const dataUrl = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : undefined
+  const uri = asset.uri || dataUrl
+  const size = asset.fileSize ?? (asset.base64 ? Math.ceil((asset.base64.length * 3) / 4) : 0)
+  if (!uri || !dataUrl || size > MAX_IMAGE_BYTES) return null
+  return {
+    id: createId('att_'),
+    type: 'image',
+    uri,
+    mimeType,
+    name: asset.fileName || 'image.jpg',
+    size,
+    width: asset.width,
+    height: asset.height,
+    dataUrl,
+  }
 }
 
 const Home = ({ componentId }: Props) => {
@@ -87,6 +113,7 @@ const Home = ({ componentId }: Props) => {
   const [promptDraft, setPromptDraft] = useState('')
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  const [pendingAttachments, setPendingAttachments] = useState<LX.ChatAttachment[]>([])
   /** 输入区「+」附件菜单：提示词等次要能力 */
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   const listRef = useRef<FlatList>(null)
@@ -170,18 +197,61 @@ const Home = ({ componentId }: Props) => {
     setRenameTarget(null)
   }, [renameTarget, renameText])
 
+  const handlePickImages = useCallback(async () => {
+    if (streaming) return
+    const remaining = MAX_IMAGE_ATTACHMENTS - pendingAttachments.length
+    if (remaining <= 0) {
+      toast(`最多选择 ${MAX_IMAGE_ATTACHMENTS} 张图片`)
+      return
+    }
+    setAttachMenuOpen(false)
+    try {
+      const response = await launchImageLibrary({
+        mediaType: 'photo',
+        selectionLimit: remaining,
+        includeBase64: true,
+        includeExtra: true,
+        quality: 0.8,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        assetRepresentationMode: 'compatible',
+      })
+      if (response.didCancel) return
+      if (response.errorMessage) {
+        toast(response.errorMessage)
+        return
+      }
+      const picked = (response.assets || [])
+        .map(buildImageAttachment)
+        .filter((item): item is LX.ChatAttachment => !!item)
+      if (!picked.length) {
+        toast(`图片需小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB`)
+        return
+      }
+      setPendingAttachments((prev) => [...prev, ...picked].slice(0, MAX_IMAGE_ATTACHMENTS))
+    } catch (err: any) {
+      toast(err?.message || '选择图片失败')
+    }
+  }, [pendingAttachments.length, streaming])
+
+  const removePendingAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => prev.filter((item) => item.id !== id))
+  }, [])
+
   const handleSend = useCallback(async () => {
-    if (!input.trim() || streaming) return
+    if ((!input.trim() && !pendingAttachments.length) || streaming) return
     if (!ensureReady()) return
     const text = input
+    const attachments = pendingAttachments
     setInput('')
+    setPendingAttachments([])
     try {
-      await chatAction.send(text)
+      await chatAction.send(text, attachments)
       scrollToEnd()
     } catch (err: any) {
       toast(err?.message || '发送失败')
     }
-  }, [input, streaming, ensureReady, scrollToEnd])
+  }, [input, pendingAttachments, streaming, ensureReady, scrollToEnd])
 
   const handleStop = useCallback(() => {
     chatAction.stop()
@@ -255,7 +325,7 @@ const Home = ({ componentId }: Props) => {
     const hasFollowUps = idx >= 0 && idx < messages.length - 1
 
     const startEdit = () => {
-      setEditTarget({ id: item.id, content: item.content })
+      setEditTarget({ id: item.id, content: item.content, attachments: item.attachments })
       setEditDraft(item.content)
     }
 
@@ -272,14 +342,14 @@ const Home = ({ componentId }: Props) => {
   const confirmEditResend = useCallback(async () => {
     if (!editTarget) return
     const text = editDraft.trim()
-    if (!text) {
+    if (!text && !editTarget.attachments?.length) {
       toast('消息不能为空')
       return
     }
     if (!ensureReady()) return
     setEditTarget(null)
     try {
-      await chatAction.resendFrom(editTarget.id, text)
+      await chatAction.resendFrom(editTarget.id, text, editTarget.attachments)
       scrollToEnd()
     } catch (err: any) {
       toast(err?.message || '重新发送失败')
@@ -421,6 +491,7 @@ const Home = ({ componentId }: Props) => {
           ? colors.userBubble
           : colors.assistantBubble
       const textColor = isUser || isError ? colors.textInverse : colors.text
+      const imageAttachments = item.attachments?.filter((attachment) => attachment.type === 'image') || []
 
       return (
         <View
@@ -437,17 +508,50 @@ const Home = ({ componentId }: Props) => {
                 },
               ]}
             >
-              {!item.content ? (
+              {!item.content && !imageAttachments.length ? (
                 isStreamingThis ? (
                   <ThinkingIndicator color={textColor} size={Math.max(16, fontSize)} />
                 ) : null
               ) : isUser ? (
-                <Text
-                  style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
-                  selectable
-                >
-                  {item.content}
-                </Text>
+                <View>
+                  {imageAttachments.length ? (
+                    <View style={styles.messageImageGrid}>
+                      {imageAttachments.map((attachment) => (
+                        <View key={attachment.id} style={styles.messageImageTile}>
+                          <Image
+                            source={{ uri: attachment.uri }}
+                            style={styles.messageImage}
+                            resizeMode="cover"
+                            accessibilityLabel={attachment.name || '图片'}
+                          />
+                          {attachment.name ? (
+                            <Text
+                              style={[styles.messageImageName, { color: textColor }]}
+                              numberOfLines={1}
+                            >
+                              {attachment.name}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  {item.content ? (
+                    <Text
+                      style={[
+                        {
+                          color: textColor,
+                          fontSize: fontSize,
+                          lineHeight: fontSize * 1.5,
+                        },
+                        imageAttachments.length ? styles.messageTextAfterImage : null,
+                      ]}
+                      selectable
+                    >
+                      {item.content}
+                    </Text>
+                  ) : null}
+                </View>
               ) : isError ? (
                 <View>
                   <View style={styles.errorTitleRow}>
@@ -569,6 +673,8 @@ const Home = ({ componentId }: Props) => {
     ]
   )
 
+  const canSend = !!input.trim() || pendingAttachments.length > 0
+
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
       <StatusBar
@@ -662,6 +768,48 @@ const Home = ({ componentId }: Props) => {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
+        {pendingAttachments.length ? (
+          <View
+            style={[
+              styles.pendingPanel,
+              { backgroundColor: colors.surface, borderTopColor: colors.border },
+            ]}
+          >
+            <View style={styles.pendingHeader}>
+              <Text style={[styles.pendingTitle, { color: colors.textSecondary }]}>
+                待发送图片 {pendingAttachments.length}/{MAX_IMAGE_ATTACHMENTS}
+              </Text>
+              <IconButton
+                name="close"
+                accessibilityLabel="清空待发送图片"
+                color={colors.textSecondary}
+                size={16}
+                onPress={() => setPendingAttachments([])}
+              />
+            </View>
+            <View style={styles.pendingGrid}>
+              {pendingAttachments.map((attachment) => (
+                <View key={attachment.id} style={styles.pendingItem}>
+                  <Image
+                    source={{ uri: attachment.uri }}
+                    style={styles.pendingImage}
+                    resizeMode="cover"
+                    accessibilityLabel={attachment.name || '待发送图片'}
+                  />
+                  <IconButton
+                    name="close"
+                    accessibilityLabel={`移除${attachment.name || '图片'}`}
+                    color="#fff"
+                    size={14}
+                    hitSlop={6}
+                    style={styles.pendingRemove}
+                    onPress={() => removePendingAttachment(attachment.id)}
+                  />
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
         <View
           style={[
             styles.composer,
@@ -706,15 +854,15 @@ const Home = ({ componentId }: Props) => {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={[
-                styles.sendBtn,
-                { backgroundColor: input.trim() ? colors.primary : colors.surfaceSecondary },
+            style={[
+              styles.sendBtn,
+                { backgroundColor: canSend ? colors.primary : colors.surfaceSecondary },
               ]}
               onPress={() => void handleSend()}
-              disabled={!input.trim()}
+              disabled={!canSend}
               accessibilityLabel="发送"
               accessibilityRole="button"
-              accessibilityState={{ disabled: !input.trim() }}
+              accessibilityState={{ disabled: !canSend }}
             >
               <Icon name="send" size={18} color="#fff" />
             </TouchableOpacity>
@@ -930,6 +1078,24 @@ const Home = ({ componentId }: Props) => {
       >
         <TouchableOpacity
           style={styles.menuRow}
+          onPress={() => void handlePickImages()}
+          disabled={streaming || pendingAttachments.length >= MAX_IMAGE_ATTACHMENTS}
+          accessibilityLabel="上传图片"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: streaming || pendingAttachments.length >= MAX_IMAGE_ATTACHMENTS }}
+        >
+          <Icon name="image" size={20} color={colors.textSecondary} />
+          <View style={styles.menuRowText}>
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+              上传图片
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              最多 {MAX_IMAGE_ATTACHMENTS} 张，每张不超过 {MAX_IMAGE_BYTES / 1024 / 1024}MB
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.menuRow}
           onPress={() => {
             setAttachMenuOpen(false)
             void openPromptModal()
@@ -1127,6 +1293,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   msgActionsRight: { justifyContent: 'flex-end' },
+  messageImageGrid: {
+    gap: 8,
+  },
+  messageImageTile: {
+    width: 190,
+    maxWidth: '100%',
+  },
+  messageImage: {
+    width: '100%',
+    height: 132,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15,23,42,0.12)',
+  },
+  messageImageName: {
+    marginTop: 4,
+    fontSize: 11,
+    opacity: 0.82,
+  },
+  messageTextAfterImage: { marginTop: 8 },
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -1136,6 +1321,39 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
   emptyDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  pendingPanel: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  pendingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  pendingTitle: { fontSize: 12, fontWeight: '700' },
+  pendingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pendingItem: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(15,23,42,0.12)',
+  },
+  pendingImage: { width: '100%', height: '100%' },
+  pendingRemove: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15,23,42,0.72)',
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',

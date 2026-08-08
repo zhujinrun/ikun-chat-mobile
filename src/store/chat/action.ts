@@ -163,9 +163,9 @@ export default {
     global.state_event.streamingUpdated()
   },
 
-  async send(content: string) {
+  async send(content: string, attachments: LX.ChatAttachment[] = []) {
     const text = content.trim()
-    if (!text || state.streaming) return
+    if ((!text && !attachments.length) || state.streaming) return
 
     let conv = conversationAction.getActive()
     if (!conv) {
@@ -178,6 +178,7 @@ export default {
       conversationId: conv.id,
       role: 'user',
       content: text,
+      attachments,
     })
 
     const assistant = await conversationAction.addMessage({
@@ -230,11 +231,15 @@ export default {
   /**
    * 编辑某条用户消息并重发：更新内容，删除其后所有消息，再请求。
    */
-  async resendFrom(userMessageId: string, content: string) {
+  async resendFrom(
+    userMessageId: string,
+    content: string,
+    attachments?: LX.ChatAttachment[]
+  ) {
     if (state.streaming) return
 
     const text = content.trim()
-    if (!text) {
+    if (!text && !attachments?.length) {
       throw new Error('消息不能为空')
     }
 
@@ -253,12 +258,13 @@ export default {
 
     await conversationAction.trimMessagesTo(conv.id, idx)
     await conversationAction.updateMessageContent(conv.id, userMessageId, text)
+    await conversationAction.updateMessageAttachments(conv.id, userMessageId, attachments)
 
     // 若是会话首条用户消息，同步刷新标题
     const convItem = conversationState.conversations.find((c) => c.id === conv.id)
     if (convItem && idx === 0) {
       await conversationAction.updateConversation(conv.id, {
-        title: text.slice(0, 30),
+        title: (text || '图片消息').slice(0, 30),
       })
     }
 
