@@ -115,6 +115,47 @@ Push `main` 或手动 `workflow_dispatch` 触发 `.github/workflows/release.yml`
 npm run publish 0.1.1   # 升版本后再 push 发版
 ```
 
+## 图片消息与多模态模型
+
+支持在输入区 **「+」** 中选择图片后与文本一同发送，适合 GLM-4V / GPT-4o / Qwen-VL 等多模态模型。
+
+### 图片消息交互
+
+- 点击消息图片可**全屏预览**；长按图片可**复制 / 查看大图 / 删除图片**（仅自己的消息可删除）。
+- 编辑重发时**保留原图附件**，可在弹窗内逐个移除后再发送。
+- 选中的图片在发送前可预览、移除。
+
+### 图片大小限制
+
+| 限制 | 数值 |
+|------|------|
+| 单次最多选择 | 4 张 |
+| 单张图片上限 | 4 MB |
+| 选图压缩 | 质量 0.8，最长边 1600px（超出自动缩放） |
+
+### 存储方式
+
+- 选图时会把图片**拷贝到应用缓存目录**（`cache/attachments/`），消息内只保存 `file://` 地址 + mime/宽高/大小等元数据，**不再把 base64 写入 AsyncStorage**，避免长期撑大本地存储。
+- 发送 / 重新生成 / 编辑重发时，才临时从缓存文件读取并生成 `dataUrl` 放入请求体，不落盘。
+- 删除消息、删除单张图片、清空会话、删会话、截断历史时，会自动回收对应的缓存文件（尽力而为）。
+- 缓存目录由系统管理，低存储时可能被系统清理，导致该图片无法预览；发送 / 重发时若缓存文件失效，会提示重新选择图片，不会静默降级或崩溃。
+
+### 模型兼容提示
+
+- 模型列表每项右侧会显示**视觉 / 仅文本 / 未知**徽标（按模型 ID 启发式推断，无法保证 100% 准确）。
+- 所选模型被判定为「仅文本」时，发送图片前会弹确认框；判定为「未知」时给出 toast 提示。
+- 切换模型时若已有待发送图片，也会给出对应提醒，避免发到不支持图片的模型上才报错。
+- 请求失败时若请求含图片，错误信息会附上「请确认当前模型支持图片输入」的提示。
+
+## Android SDK 注意事项
+
+- 项目参数：`compileSdkVersion 34`、`minSdkVersion 23`、`targetSdkVersion 29`，JDK 17+。
+- 图片相关原生能力依赖 **FileProvider**（authority 为 `${applicationId}.provider`，已在 `AndroidManifest.xml` 声明，`res/xml/file_paths.xml` 开放了 `cache-path`）。
+- 复制图片到剪贴板：**Android 10+** 走 MediaStore（无需权限）；**Android 9-** 走 FileProvider + `prepareToLeaveContext`（反射调用，低版本 SDK 无则跳过）。
+- 修改 `android/` 下的原生代码（如 `UtilsModule.java`、Manifest）后必须重新执行打包（`npm run dev` / `pack:android:*`），JS/TS 改动可热重载。
+- Windows 下执行 Gradle 使用 `gradlew.bat`，对应脚本为 `pack:android:debug:win`、`pack:android:win`、`clear:win`。
+- 本地图片缓存在应用私有缓存目录内，无需额外存储权限。
+
 ## 中转站配置说明
 
 - **API URL**：可填 `https://host` 或 `https://host/v1`，客户端会规范化到 `.../v1`
