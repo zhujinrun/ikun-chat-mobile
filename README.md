@@ -25,13 +25,39 @@
 
 ## 开发
 
+当前仓库已按 Linux / Ubuntu 环境整理启动脚本，Android Gradle 命令默认使用 `android/gradlew`。
+
 ```bash
-# 需要 Node >= 18
+# 环境要求
+# - Node >= 18（仓库 .nvmrc 为 22；当前 Node 20+ 也符合 package.json engines）
+# - JDK 17+
+# - Android SDK / platform-tools，并确保 adb 可用
+
 npm install
 npm start
 # 另开终端
 npm run dev
 ```
+
+调试开发节奏：
+
+1. 先确认模拟器已连接：`adb devices`
+2. 一个终端保持运行 `npm start`
+3. 另一个终端执行 `npm run dev` 安装并启动 debug 包
+4. 改 JS / TS / TSX 通常直接自动刷新或手动 Reload；改 Android 原生代码、Gradle 配置或依赖后重新执行 `npm run dev`
+5. 需要打开 Android 调试菜单时执行 `npm run menu`
+
+常用命令：
+
+```bash
+npm run sc                  # 重启 Metro 并清缓存
+npm run typecheck           # TypeScript 类型检查
+npm run menu                # 打开 Android 调试菜单
+npm run pack:android:debug  # 生成 debug APK
+npm run clear               # Gradle clean
+```
+
+如果需要在 Windows 下执行 Gradle 打包，可使用 `pack:android:debug:win`、`pack:android:win`、`clear:win`。
 
 ### 本地 Release 打包
 
