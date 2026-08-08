@@ -41,6 +41,7 @@ import ActionButton from '@/components/common/ActionButton'
 import AppModal from '@/components/common/AppModal'
 import FormField from '@/components/common/FormField'
 import { createId } from '@/utils/id'
+import { copyImageToClipboard } from '@/utils/nativeModules/utils'
 
 type Props = {
   componentId: string
@@ -116,6 +117,10 @@ const Home = ({ componentId }: Props) => {
   const [pendingAttachments, setPendingAttachments] = useState<LX.ChatAttachment[]>([])
   /** 输入区「+」附件菜单：提示词等次要能力 */
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
+  /** 全屏预览的图片 */
+  const [previewImage, setPreviewImage] = useState<LX.ChatAttachment | null>(null)
+  /** 编辑重发：待发送的图片附件（保留原图，可逐个移除） */
+  const [editAttachments, setEditAttachments] = useState<LX.ChatAttachment[]>([])
   const listRef = useRef<FlatList>(null)
 
   const active = useMemo(
@@ -326,6 +331,7 @@ const Home = ({ componentId }: Props) => {
 
     const startEdit = () => {
       setEditTarget({ id: item.id, content: item.content, attachments: item.attachments })
+      setEditAttachments(item.attachments?.filter((a) => a.type === 'image') || [])
       setEditDraft(item.content)
     }
 
@@ -341,20 +347,68 @@ const Home = ({ componentId }: Props) => {
 
   const confirmEditResend = useCallback(async () => {
     if (!editTarget) return
+    const target = editTarget
     const text = editDraft.trim()
-    if (!text && !editTarget.attachments?.length) {
+    if (!text && !editAttachments.length) {
       toast('消息不能为空')
       return
     }
     if (!ensureReady()) return
     setEditTarget(null)
     try {
-      await chatAction.resendFrom(editTarget.id, text, editTarget.attachments)
+      await chatAction.resendFrom(target.id, text, editAttachments)
       scrollToEnd()
     } catch (err: any) {
       toast(err?.message || '重新发送失败')
     }
-  }, [editTarget, editDraft, ensureReady, scrollToEnd])
+  }, [editTarget, editDraft, editAttachments, ensureReady, scrollToEnd])
+
+  /** 编辑弹窗内移除某张原图附件 */
+  const removeEditAttachment = useCallback((id: string) => {
+    setEditAttachments((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
+  /** 点击消息图片：全屏预览 */
+  const openImagePreview = useCallback((attachment: LX.ChatAttachment) => {
+    setPreviewImage(attachment)
+  }, [])
+
+  /** 长按消息图片：复制 / 删除图片 */
+  const handleImageLongPress = useCallback(
+    (item: LX.ChatMessage, attachment: LX.ChatAttachment) => {
+      if (streaming) return
+      const buttons: {
+        text: string
+        style?: 'cancel' | 'destructive' | 'default'
+        onPress?: () => void
+      }[] = [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '复制图片',
+          onPress: () => {
+            void copyImageToClipboard(attachment.uri)
+              .then(() => toast('图片已复制到剪贴板'))
+              .catch((err: any) => toast(err?.message || '复制图片失败'))
+          },
+        },
+        { text: '查看大图', onPress: () => openImagePreview(attachment) },
+      ]
+      if (item.role === 'user' && activeId) {
+        buttons.push({
+          text: '删除图片',
+          style: 'destructive',
+          onPress: () => {
+            void conversationAction
+              .removeAttachment(activeId, item.id, attachment.id)
+              .then(() => toast('已删除图片'))
+              .catch((err: any) => toast(err?.message || '删除图片失败'))
+          },
+        })
+      }
+      Alert.alert(attachment.name || '图片', undefined, buttons)
+    },
+    [streaming, activeId, openImagePreview]
+  )
 
   const openPromptModal = useCallback(async () => {
     let conv = active
@@ -517,12 +571,19 @@ const Home = ({ componentId }: Props) => {
                   {imageAttachments.length ? (
                     <View style={styles.messageImageGrid}>
                       {imageAttachments.map((attachment) => (
-                        <View key={attachment.id} style={styles.messageImageTile}>
+                        <Pressable
+                          key={attachment.id}
+                          style={styles.messageImageTile}
+                          onPress={() => openImagePreview(attachment)}
+                          onLongPress={() => handleImageLongPress(item, attachment)}
+                          accessibilityRole="imagebutton"
+                          accessibilityLabel={attachment.name || '图片'}
+                          accessibilityHint="点击查看大图，长按复制或删除"
+                        >
                           <Image
                             source={{ uri: attachment.uri }}
                             style={styles.messageImage}
                             resizeMode="cover"
-                            accessibilityLabel={attachment.name || '图片'}
                           />
                           {attachment.name ? (
                             <Text
@@ -532,7 +593,7 @@ const Home = ({ componentId }: Props) => {
                               {attachment.name}
                             </Text>
                           ) : null}
-                        </View>
+                        </Pressable>
                       ))}
                     </View>
                   ) : null}
@@ -665,6 +726,8 @@ const Home = ({ componentId }: Props) => {
       handleRegenerate,
       handleRetry,
       openEditMessage,
+      openImagePreview,
+      handleImageLongPress,
       streaming,
       streamingMessageId,
       lastMessageId,
@@ -789,12 +852,18 @@ const Home = ({ componentId }: Props) => {
             </View>
             <View style={styles.pendingGrid}>
               {pendingAttachments.map((attachment) => (
-                <View key={attachment.id} style={styles.pendingItem}>
+                <Pressable
+                  key={attachment.id}
+                  style={styles.pendingItem}
+                  onPress={() => openImagePreview(attachment)}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel={attachment.name || '待发送图片'}
+                  accessibilityHint="点击查看大图"
+                >
                   <Image
                     source={{ uri: attachment.uri }}
                     style={styles.pendingImage}
                     resizeMode="cover"
-                    accessibilityLabel={attachment.name || '待发送图片'}
                   />
                   <IconButton
                     name="close"
@@ -805,7 +874,7 @@ const Home = ({ componentId }: Props) => {
                     style={styles.pendingRemove}
                     onPress={() => removePendingAttachment(attachment.id)}
                   />
-                </View>
+                </Pressable>
               ))}
             </View>
             <Text style={[styles.pendingHint, { color: colors.textSecondary }]}>
@@ -1212,6 +1281,40 @@ const Home = ({ componentId }: Props) => {
           inputContainerStyle={styles.promptFieldBox}
           inputStyle={{ fontSize }}
         />
+        {editAttachments.length ? (
+          <View style={styles.editAttachmentsBlock}>
+            <Text style={[styles.editAttachmentsTitle, { color: colors.textSecondary }]}>
+              原消息图片（将随重发上传，可移除）
+            </Text>
+            <View style={styles.pendingGrid}>
+              {editAttachments.map((attachment) => (
+                <Pressable
+                  key={attachment.id}
+                  style={styles.pendingItem}
+                  onPress={() => openImagePreview(attachment)}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel={attachment.name || '原图图片'}
+                  accessibilityHint="点击查看大图"
+                >
+                  <Image
+                    source={{ uri: attachment.uri }}
+                    style={styles.pendingImage}
+                    resizeMode="cover"
+                  />
+                  <IconButton
+                    name="close"
+                    accessibilityLabel={`移除原图${attachment.name || ''}`}
+                    color="#fff"
+                    size={14}
+                    hitSlop={6}
+                    style={styles.pendingRemove}
+                    onPress={() => removeEditAttachment(attachment.id)}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
         <View style={styles.modalActions}>
           <ActionButton
             title="取消"
@@ -1228,6 +1331,55 @@ const Home = ({ componentId }: Props) => {
           />
         </View>
       </AppModal>
+
+      {/* 图片大图预览（全屏） */}
+      <Modal
+        visible={!!previewImage}
+        transparent={false}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setPreviewImage(null)}
+      >
+        <View style={styles.previewRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setPreviewImage(null)}
+            accessibilityLabel="关闭预览"
+          />
+          {previewImage ? (
+            <>
+              <Image
+                source={{ uri: previewImage.uri }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+              <View style={styles.previewTopBar}>
+                <Text style={styles.previewName} numberOfLines={1}>
+                  {previewImage.name || '图片预览'}
+                </Text>
+                <IconButton
+                  name="copy"
+                  accessibilityLabel="复制图片"
+                  color="#fff"
+                  size={22}
+                  onPress={() => {
+                    void copyImageToClipboard(previewImage.uri)
+                      .then(() => toast('图片已复制到剪贴板'))
+                      .catch((err: any) => toast(err?.message || '复制图片失败'))
+                  }}
+                />
+                <IconButton
+                  name="close"
+                  accessibilityLabel="关闭预览"
+                  color="#fff"
+                  size={24}
+                  onPress={() => setPreviewImage(null)}
+                />
+              </View>
+            </>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -1485,6 +1637,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  editAttachmentsBlock: {
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  editAttachmentsTitle: {
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  previewRoot: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  previewImage: {
+    flex: 1,
+    width: '100%',
+  },
+  previewTopBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 8 : 20,
+    paddingBottom: 8,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    gap: 12,
+  },
+  previewName: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
   },
 })
 

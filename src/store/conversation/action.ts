@@ -346,6 +346,41 @@ export default {
     }
   },
 
+  /** 删除单条消息（本地历史） */
+  async removeMessage(conversationId: string, messageId: string) {
+    const list = state.messages[conversationId]
+    if (!list) return
+    const idx = list.findIndex((m) => m.id === messageId)
+    if (idx < 0) return
+    list.splice(idx, 1)
+    await writeMessagesToStorage(conversationId)
+    global.state_event.messagesUpdated(conversationId)
+  },
+
+  /** 删除某条消息里的单个图片附件；图片删完后只剩空则删除整条消息 */
+  async removeAttachment(
+    conversationId: string,
+    messageId: string,
+    attachmentId: string
+  ) {
+    const list = state.messages[conversationId]
+    if (!list) return
+    const msg = list.find((m) => m.id === messageId)
+    if (!msg) return
+    const rest = (msg.attachments || []).filter((a) => a.id !== attachmentId)
+    if (msg.role === 'user' && rest.length === 0 && !msg.content.trim()) {
+      return this.removeMessage(conversationId, messageId)
+    }
+    if (rest.length) {
+      msg.attachments = rest
+    } else {
+      delete msg.attachments
+    }
+    flushScheduledMessagesUpdated(conversationId)
+    await writeMessagesToStorage(conversationId)
+    global.state_event.messagesUpdated(conversationId)
+  },
+
   /** 保留 [0, keepUntilIndex]（含），删除之后的消息 */
   async trimMessagesTo(conversationId: string, keepUntilIndex: number) {
     const list = state.messages[conversationId]

@@ -1,6 +1,17 @@
-import { NativeModules } from 'react-native'
+import { NativeModules, Platform } from 'react-native'
 
 const { UtilsModule } = NativeModules
+
+/** 将本地图片文件复制到系统剪贴板（原生写入，粘贴到其他应用可用） */
+export const copyImageToClipboard = async (uri: string): Promise<void> => {
+  if (Platform.OS !== 'android') {
+    throw new Error('当前系统暂不支持复制图片到剪贴板')
+  }
+  if (!uri || !UtilsModule?.copyImageToClipboard) {
+    throw new Error('当前版本不支持复制图片到剪贴板')
+  }
+  await UtilsModule.copyImageToClipboard(uri)
+}
 
 export const exitApp = () => {
   if (UtilsModule?.exitApp) UtilsModule.exitApp()

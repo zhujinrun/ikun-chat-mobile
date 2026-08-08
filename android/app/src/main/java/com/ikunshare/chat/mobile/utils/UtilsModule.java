@@ -3,6 +3,9 @@ package com.ikunshare.chat.mobile.utils;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -11,6 +14,7 @@ import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.view.Window;
 import android.view.WindowManager;
@@ -28,7 +32,11 @@ import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeArray;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -249,6 +257,170 @@ public class UtilsModule extends ReactContextBaseJavaModule {
       activity.runOnUiThread(() -> {
         activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
       });
+    }
+  }
+
+  /**
+   * 将图片（file:// 或 content:// 或 data: 地址）写入系统剪贴板，便于粘贴到其他应用。
+   * Android 10+ 走 MediaStore（无需权限，不落可见文件目录之外）；
+   * Android 9- 走 FileProvider + prepareToLeaveContext。
+   */
+  @ReactMethod
+  public void copyImageToClipboard(String uriStr, Promise promise) {
+    new Thread(() -> {
+      try {
+        if (uriStr == null || uriStr.isEmpty()) {
+          promise.reject("EMPTY_URI", "图片地址为空");
+          return;
+        }
+        byte[] bytes = readUri(Uri.parse(uriStr));
+        if (bytes == null || bytes.length == 0) {
+          promise.reject("READ_FAILED", "读取图片失败");
+          return;
+        }
+        String mime = detectImageMime(bytes);
+        String ext = mime.contains("png") ? ".png" : mime.contains("webp") ? ".webp" : ".jpg";
+
+        Uri clipUri = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          clipUri = insertToMediaStore(bytes, mime, ext);
+        }
+        ClipData clip = null;
+        if (clipUri == null) {
+          clipUri = writeToCacheFile(bytes, mime, ext);
+          if (clipUri != null) {
+            clip = ClipData.newUri(reactContext.getContentResolver(), "image", clipUri);
+            // 让剪贴板粘贴方在离开本应用时也能读取临时授权（反射调用，低版本 SDK 无则跳过）
+            grantClipReadPermission(clip);
+          }
+        } else {
+          clip = ClipData.newUri(reactContext.getContentResolver(), "image", clipUri);
+        }
+
+        if (clip == null) {
+          promise.reject("WRITE_FAILED", "写入剪贴板失败");
+          return;
+        }
+        ClipboardManager clipboard =
+          (ClipboardManager) reactContext.getSystemService(Context.CLIPBOARD_SERVICE);
+        clipboard.setPrimaryClip(clip);
+        promise.resolve(true);
+      } catch (Exception e) {
+        Log.e("Utils", "copyImageToClipboard error", e);
+        promise.reject("COPY_IMAGE", e.getMessage() != null ? e.getMessage() : "复制失败");
+      }
+    }).start();
+  }
+
+  private byte[] readUri(Uri uri) throws Exception {
+    String scheme = uri.getScheme();
+    if ("data".equalsIgnoreCase(scheme)) {
+      String whole = uri.toString();
+      int comma = whole.indexOf(',');
+      if (comma < 0) throw new Exception("无法读取图片数据");
+      String meta = whole.substring(5, comma);
+      String body = whole.substring(comma + 1);
+      if (meta.contains(";base64")) {
+        return android.util.Base64.decode(body, android.util.Base64.DEFAULT);
+      }
+      return java.net.URLDecoder.decode(body, "UTF-8").getBytes("UTF-8");
+    }
+    InputStream input = reactContext.getContentResolver().openInputStream(uri);
+    if (input == null) throw new Exception("无法读取图片地址");
+    ByteArrayOutputStream buf = new ByteArrayOutputStream();
+    byte[] chunk = new byte[8192];
+    int read;
+    while ((read = input.read(chunk)) != -1) {
+      buf.write(chunk, 0, read);
+    }
+    input.close();
+    return buf.toByteArray();
+  }
+
+  private String detectImageMime(byte[] bytes) {
+    try {
+      if (bytes.length >= 2 && bytes[0] == (byte) 0xFF && bytes[1] == (byte) 0xD8) {
+        return "image/jpeg";
+      }
+      if (bytes.length >= 8 &&
+        bytes[0] == (byte) 0x89 && bytes[1] == (byte) 0x50 &&
+        bytes[2] == (byte) 0x4E && bytes[3] == (byte) 0x47) {
+        return "image/png";
+      }
+      if (bytes.length >= 12 &&
+        bytes[0] == (byte) 0x52 && bytes[1] == (byte) 0x49 &&
+        bytes[2] == (byte) 0x46 && bytes[3] == (byte) 0x46 &&
+        bytes[8] == (byte) 0x57 && bytes[9] == (byte) 0x45 &&
+        bytes[10] == (byte) 0x42 && bytes[11] == (byte) 0x50) {
+        return "image/webp";
+      }
+      if (bytes.length >= 4 && bytes[0] == (byte) 0x52 && bytes[1] == (byte) 0x49 &&
+        bytes[2] == (byte) 0x46 && bytes[3] == (byte) 0x46) {
+        return "image/jpeg";
+      }
+      return "image/png";
+    } catch (Exception e) {
+      return "image/png";
+    }
+  }
+
+  /** Android 10+：写入 MediaStore，无需存储权限，仍可从外部粘贴读取 */
+  private Uri insertToMediaStore(byte[] bytes, String mime, String ext) {
+    try {
+      String name = "ikun_image_" + System.currentTimeMillis() + ext;
+      ContentValues values = new ContentValues();
+      values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+      values.put(MediaStore.Images.Media.MIME_TYPE, mime);
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        values.put(MediaStore.Images.Media.IS_PENDING, 1);
+      }
+      Uri collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+      Uri itemUri = reactContext.getContentResolver().insert(collection, values);
+      if (itemUri == null) return null;
+      OutputStream out = reactContext.getContentResolver().openOutputStream(itemUri);
+      if (out == null) return null;
+      out.write(bytes);
+      out.flush();
+      out.close();
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        values.clear();
+        values.put(MediaStore.Images.Media.IS_PENDING, 0);
+        reactContext.getContentResolver().update(itemUri, values, null, null);
+      }
+      return itemUri;
+    } catch (Exception e) {
+      Log.e("Utils", "insertToMediaStore error", e);
+      return null;
+    }
+  }
+
+  /** Android 9-（或 MediaStore 失败时）：落盘到 cache 目录并借助 FileProvider 授权 */
+  private Uri writeToCacheFile(byte[] bytes, String mime, String ext) {
+    try {
+      File dir = new File(reactContext.getCacheDir(), "clipboard");
+      if (!dir.exists() && !dir.mkdirs()) return null;
+      File file = new File(dir, "ikun_image_" + System.currentTimeMillis() + ext);
+      FileOutputStream fos = new FileOutputStream(file);
+      fos.write(bytes);
+      fos.flush();
+      fos.close();
+      return FileProvider.getUriForFile(reactContext, reactContext.getPackageName() + ".provider", file);
+    } catch (Exception e) {
+      Log.e("Utils", "writeToCacheFile error", e);
+      return null;
+    }
+  }
+
+  /**
+   * ClipData.prepareToLeaveContext(boolean) 在旧 compileSdk 下可能缺失，
+   * 用反射调用：高版本自动给粘贴方开放读取，低版本静默跳过。
+   */
+  private void grantClipReadPermission(ClipData clip) {
+    try {
+      var method = ClipData.class.getMethod("prepareToLeaveContext", boolean.class);
+      method.invoke(clip, false);
+    } catch (Exception ignored) {
+      // 忽略：低版本无法授权时，粘贴方可能读不到缓存图片
     }
   }
 
