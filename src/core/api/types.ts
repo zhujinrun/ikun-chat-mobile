@@ -1,6 +1,12 @@
+export type ApiMessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
+
+export type ApiMessageContent = string | ApiMessageContentPart[]
+
 export type ApiMessage = {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: ApiMessageContent
 }
 
 /** 部分中转站 content 可能是 string 或分段数组 */

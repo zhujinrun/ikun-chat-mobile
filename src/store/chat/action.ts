@@ -1,9 +1,27 @@
 import { chatCompletionsStream } from '@/core/api'
-import type { ApiMessage } from '@/core/api'
+import type { ApiMessage, ApiMessageContentPart } from '@/core/api'
 import conversationAction from '@/store/conversation/action'
 import conversationState from '@/store/conversation/state'
 import settingState from '@/store/setting/state'
 import state from './state'
+
+const buildUserContent = (message: LX.ChatMessage): ApiMessage['content'] => {
+  const imageAttachments =
+    message.attachments?.filter((item) => item.type === 'image' && item.dataUrl) || []
+  const text = message.content.trim()
+  if (!imageAttachments.length) return text
+
+  const parts: ApiMessageContentPart[] = []
+  if (text) parts.push({ type: 'text', text })
+  for (const attachment of imageAttachments) {
+    if (!attachment.dataUrl) continue
+    parts.push({
+      type: 'image_url',
+      image_url: { url: attachment.dataUrl, detail: 'auto' },
+    })
+  }
+  return parts.length ? parts : text
+}
 
 const buildApiMessages = (conversationId: string): ApiMessage[] => {
   const conv = conversationState.conversations.find((c) => c.id === conversationId)
@@ -15,8 +33,10 @@ const buildApiMessages = (conversationId: string): ApiMessage[] => {
     messages.push({ role: 'system', content: systemPrompt.trim() })
   }
   for (const m of history) {
-    if (m.role === 'user' || m.role === 'assistant') {
-      messages.push({ role: m.role, content: m.content })
+    if (m.role === 'user') {
+      messages.push({ role: 'user', content: buildUserContent(m) })
+    } else if (m.role === 'assistant') {
+      messages.push({ role: 'assistant', content: m.content })
     }
   }
   return messages
