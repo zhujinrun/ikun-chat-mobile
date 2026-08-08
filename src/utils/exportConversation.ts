@@ -14,9 +14,16 @@ export const formatConversationText = (
     const roleLabel =
       m.role === 'user' ? '用户' : m.role === 'assistant' ? '助手' : m.role === 'error' ? '错误' : m.role
     const body = (m.content || '').trim()
-    if (!body && m.role !== 'error') continue
+    const attachments = m.attachments?.filter((item) => item.type === 'image') || []
+    if (!body && !attachments.length && m.role !== 'error') continue
     lines.push(`## ${roleLabel}`)
-    lines.push(body || '（空）')
+    if (body) lines.push(body)
+    for (const [index, attachment] of attachments.entries()) {
+      const label = attachment.name || `图片 ${index + 1}`
+      const size = attachment.size ? `，${Math.round(attachment.size / 1024)}KB` : ''
+      lines.push(`[图片: ${label}${size}]`)
+    }
+    if (!body && !attachments.length) lines.push('（空）')
     lines.push('')
   }
 

@@ -74,6 +74,34 @@ const sortConversations = () => {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v)
 
+const sanitizeAttachments = (raw: unknown): LX.ChatAttachment[] | undefined => {
+  if (!Array.isArray(raw)) return undefined
+  const list: LX.ChatAttachment[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const type = item.type === 'image' ? 'image' : null
+    const uri = typeof item.uri === 'string' ? item.uri.trim() : ''
+    const dataUrl = typeof item.dataUrl === 'string' ? item.dataUrl.trim() : undefined
+    const mimeType =
+      typeof item.mimeType === 'string' && item.mimeType.trim()
+        ? item.mimeType.trim()
+        : 'image/jpeg'
+    if (!type || (!uri && !dataUrl)) continue
+    list.push({
+      id: typeof item.id === 'string' && item.id ? item.id : createId('att_'),
+      type,
+      uri: uri || dataUrl || '',
+      mimeType,
+      name: typeof item.name === 'string' && item.name ? item.name : undefined,
+      size: typeof item.size === 'number' && item.size >= 0 ? item.size : undefined,
+      width: typeof item.width === 'number' && item.width > 0 ? item.width : undefined,
+      height: typeof item.height === 'number' && item.height > 0 ? item.height : undefined,
+      dataUrl,
+    })
+  }
+  return list.length ? list : undefined
+}
+
 /** 消毒会话列表，避免脏数据导致启动崩溃 */
 const sanitizeConversations = (raw: unknown): LX.Conversation[] => {
   if (!Array.isArray(raw)) return []
@@ -112,6 +140,7 @@ const sanitizeMessages = (raw: unknown, conversationId: string): LX.ChatMessage[
         typeof item.conversationId === 'string' ? item.conversationId : conversationId,
       role,
       content: typeof item.content === 'string' ? item.content : String(item.content ?? ''),
+      attachments: sanitizeAttachments(item.attachments),
       createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
     })
   }
@@ -237,6 +266,7 @@ export default {
       conversationId: message.conversationId,
       role: message.role,
       content: message.content,
+      attachments: message.attachments?.length ? message.attachments : undefined,
       createdAt: Date.now(),
     }
     list.push(full)
@@ -248,9 +278,9 @@ export default {
       if (
         message.role === 'user' &&
         (conv.title === '新对话' || conv.title === 'New Chat') &&
-        message.content.trim()
+        (message.content.trim() || message.attachments?.length)
       ) {
-        conv.title = message.content.trim().slice(0, 30)
+        conv.title = (message.content.trim() || '图片消息').slice(0, 30)
       }
       sortConversations()
       await persistConversations()

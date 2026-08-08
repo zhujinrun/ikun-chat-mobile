@@ -27,11 +27,26 @@ declare global {
 
     type ChatRole = 'system' | 'user' | 'assistant' | 'error'
 
+    type ChatAttachmentType = 'image'
+
+    type ChatAttachment = {
+      id: string
+      type: ChatAttachmentType
+      uri: string
+      mimeType: string
+      name?: string
+      size?: number
+      width?: number
+      height?: number
+      dataUrl?: string
+    }
+
     type ChatMessage = {
       id: string
       conversationId: string
       role: ChatRole
       content: string
+      attachments?: ChatAttachment[]
       createdAt: number
     }
 
