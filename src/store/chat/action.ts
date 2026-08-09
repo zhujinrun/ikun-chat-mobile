@@ -135,6 +135,12 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       },
       controller.signal
     )
+    if (controller.signal.aborted) {
+      finalStatus = 'stopped'
+      if (!full) {
+        await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）', false)
+      }
+    }
   } catch (err: any) {
     if (controller.signal.aborted) {
       finalStatus = 'stopped'
@@ -180,14 +186,20 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
     } catch (err) {
       console.error('[chat] flushMessages failed', err)
     }
-    state.streaming = false
-    state.streamingConversationId = null
-    state.streamingMessageId = null
-    state.abortController = null
-    try {
-      global.state_event.streamingUpdated()
-    } catch (err) {
-      console.error('[chat] streamingUpdated failed', err)
+    if (
+      state.abortController === controller &&
+      state.streamingConversationId === conv.id &&
+      state.streamingMessageId === assistant.id
+    ) {
+      state.streaming = false
+      state.streamingConversationId = null
+      state.streamingMessageId = null
+      state.abortController = null
+      try {
+        global.state_event.streamingUpdated()
+      } catch (err) {
+        console.error('[chat] streamingUpdated failed', err)
+      }
     }
   }
 
@@ -229,11 +241,6 @@ const regenerateFromUserIndex = async (conv: LX.Conversation, userIdx: number) =
 export default {
   stop() {
     state.abortController?.abort()
-    state.abortController = null
-    state.streaming = false
-    state.streamingConversationId = null
-    state.streamingMessageId = null
-    global.state_event.streamingUpdated()
   },
 
   async send(content: string, attachments: LX.ChatAttachment[] = []) {
