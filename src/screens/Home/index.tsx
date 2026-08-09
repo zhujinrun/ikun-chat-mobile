@@ -198,6 +198,8 @@ const Home = ({ componentId }: Props) => {
   const currentModelId = active?.model || defaultModel || ''
   /** 当前模型图片能力（用于标记与发送前提示） */
   const currentVision = inferVisionCapability(currentModelId)
+  const hasPendingImage = pendingAttachments.length > 0
+  const isPendingImageTextOnly = hasPendingImage && currentVision === 'text'
   const needSetup = !apiUrl || !apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
   const colors = theme.colors
@@ -367,9 +369,13 @@ const Home = ({ componentId }: Props) => {
       if (cap === 'text') {
         Alert.alert(
           '仅文本模型',
-          `当前模型「${active?.model || defaultModel}」通常不支持图片输入，发送图片后可能报错。仍要发送吗？`,
+          `当前模型「${active?.model || defaultModel}」通常不支持图片输入。建议先切换到视觉模型，或移除图片后再发送。`,
           [
             { text: '取消', style: 'cancel' },
+            {
+              text: '切换模型',
+              onPress: () => setModelPickerOpen(true),
+            },
             { text: '仍然发送', style: 'destructive', onPress: () => void doSend() },
           ]
         )
@@ -933,6 +939,11 @@ const Home = ({ componentId }: Props) => {
   )
 
   const canSend = !!input.trim() || pendingAttachments.length > 0
+  const sendButtonBg = !canSend
+    ? colors.surfaceSecondary
+    : isPendingImageTextOnly
+      ? colors.error
+      : colors.primary
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
@@ -1081,13 +1092,33 @@ const Home = ({ componentId }: Props) => {
                 </Pressable>
               ))}
             </View>
-            <Text style={[styles.pendingHint, { color: colors.textSecondary }]}>
-              {currentVision === 'vision'
-                ? `已选图片 · ${visionCapabilityLabel(currentVision)}模型（${currentModel}）支持图片输入`
-                : currentVision === 'text'
-                  ? `已选图片 · 当前模型「${currentModel}」为仅文本，发送时可能不支持`
-                  : `已选图片 · 模型「${currentModel}」图片能力未知，发送时可能提示不支持`}
-            </Text>
+            <View style={styles.pendingCapabilityRow}>
+              <Text
+                style={[
+                  styles.pendingHint,
+                  { color: isPendingImageTextOnly ? colors.error : colors.textSecondary },
+                ]}
+              >
+                {currentVision === 'vision'
+                  ? `已选图片 · ${visionCapabilityLabel(currentVision)}模型（${currentModel}）支持图片输入`
+                  : currentVision === 'text'
+                    ? `已选图片 · 当前模型「${currentModel}」为仅文本，建议切换视觉模型`
+                    : `已选图片 · 模型「${currentModel}」图片能力未知，发送时可能提示不支持`}
+              </Text>
+              {isPendingImageTextOnly ? (
+                <TouchableOpacity
+                  style={[styles.pendingCapabilityAction, { borderColor: colors.error }]}
+                  onPress={() => setModelPickerOpen(true)}
+                  accessibilityLabel="切换视觉模型"
+                  accessibilityRole="button"
+                >
+                  <Icon name="model" size={13} color={colors.error} />
+                  <Text style={[styles.pendingCapabilityActionText, { color: colors.error }]}>
+                    切换模型
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </View>
         ) : null}
         <View
@@ -1134,13 +1165,13 @@ const Home = ({ componentId }: Props) => {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-            style={[
-              styles.sendBtn,
-                { backgroundColor: canSend ? colors.primary : colors.surfaceSecondary },
+              style={[
+                styles.sendBtn,
+                { backgroundColor: sendButtonBg },
               ]}
               onPress={() => void handleSend()}
               disabled={!canSend}
-              accessibilityLabel="发送"
+              accessibilityLabel={isPendingImageTextOnly ? '发送，当前模型可能不支持图片' : '发送'}
               accessibilityRole="button"
               accessibilityState={{ disabled: !canSend }}
             >
@@ -1757,11 +1788,28 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  pendingHint: {
-    fontSize: 11,
-    lineHeight: 16,
+  pendingCapabilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginTop: 6,
   },
+  pendingHint: {
+    flexShrink: 1,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  pendingCapabilityAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  pendingCapabilityActionText: { fontSize: 11, fontWeight: '700' },
   pendingItem: {
     width: 72,
     height: 72,
