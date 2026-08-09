@@ -439,7 +439,7 @@ const Home = ({ componentId }: Props) => {
   //   ])
   // }, [activeId])
 
-  const openEditMessage = useCallback((item: LX.ChatMessage) => {
+  const openEditMessage = useCallback((item: LX.ChatMessage, options?: { confirmFollowUps?: boolean }) => {
     if (item.role !== 'user' || streaming) return
     const idx = messages.findIndex((m) => m.id === item.id)
     const hasFollowUps = idx >= 0 && idx < messages.length - 1
@@ -450,7 +450,7 @@ const Home = ({ componentId }: Props) => {
       setEditDraft(item.content)
     }
 
-    if (hasFollowUps) {
+    if (hasFollowUps && options?.confirmFollowUps !== false) {
       Alert.alert('编辑消息', '将删除此消息之后的所有回复，并以新内容重新发送。', [
         { text: '取消', style: 'cancel' },
         { text: '继续编辑', onPress: startEdit },
@@ -459,6 +459,15 @@ const Home = ({ componentId }: Props) => {
       startEdit()
     }
   }, [messages, streaming])
+
+  const openLastUserForRetryEdit = useCallback(() => {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+    if (!lastUser) {
+      toast('没有可编辑的用户消息')
+      return
+    }
+    openEditMessage(lastUser, { confirmFollowUps: false })
+  }, [messages, openEditMessage])
 
   const confirmEditResend = useCallback(async () => {
     if (!editTarget) return
@@ -649,6 +658,10 @@ const Home = ({ componentId }: Props) => {
             void handleRetry()
           },
         })
+        buttons.push({
+          text: '编辑后重试',
+          onPress: openLastUserForRetryEdit,
+        })
       }
       if (buttons.length <= 1) return
       Alert.alert('消息', undefined, buttons)
@@ -659,6 +672,7 @@ const Home = ({ componentId }: Props) => {
       canRegenerate,
       handleCopy,
       openEditMessage,
+      openLastUserForRetryEdit,
       handleRegenerate,
       handleRetry,
     ]
@@ -783,15 +797,26 @@ const Home = ({ componentId }: Props) => {
                     </Text>
                   ) : null}
                   {isLast && canRegenerate ? (
-                    <TouchableOpacity
-                      style={styles.errorRetryBtn}
-                      onPress={() => void handleRetry()}
-                      accessibilityLabel="重试"
-                      accessibilityRole="button"
-                    >
-                      <Icon name="retry" size={16} color={textColor} />
-                      <Text style={[styles.errorRetryText, { color: textColor }]}>重试</Text>
-                    </TouchableOpacity>
+                    <View style={styles.errorActionRow}>
+                      <TouchableOpacity
+                        style={styles.errorRetryBtn}
+                        onPress={() => void handleRetry()}
+                        accessibilityLabel="重试"
+                        accessibilityRole="button"
+                      >
+                        <Icon name="retry" size={16} color={textColor} />
+                        <Text style={[styles.errorRetryText, { color: textColor }]}>重试</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.errorRetryBtn}
+                        onPress={openLastUserForRetryEdit}
+                        accessibilityLabel="编辑后重试"
+                        accessibilityRole="button"
+                      >
+                        <Icon name="edit" size={16} color={textColor} />
+                        <Text style={[styles.errorRetryText, { color: textColor }]}>编辑后重试</Text>
+                      </TouchableOpacity>
+                    </View>
                   ) : null}
                 </View>
               ) : isStreamingThis ? (
@@ -865,6 +890,7 @@ const Home = ({ componentId }: Props) => {
       handleMessageLongPress,
       handleRegenerate,
       handleRetry,
+      openLastUserForRetryEdit,
       openEditMessage,
       openImagePreview,
       handleImageLongPress,
@@ -1592,11 +1618,17 @@ const styles = StyleSheet.create({
   bubbleRight: { alignSelf: 'flex-end' },
   bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
   errorTitleRow: { flexDirection: 'row', alignItems: 'center' },
+  errorActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
   errorRetryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    marginTop: 10,
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
