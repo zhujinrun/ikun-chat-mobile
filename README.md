@@ -90,8 +90,8 @@ npm run pack
 产物位于 `android/app/build/outputs/apk/release/`，命名形如：
 
 ```text
-ikun-chat-mobile-v0.1.2-arm64-v8a.apk
-ikun-chat-mobile-v0.1.2-universal.apk
+ikun-chat-mobile-v0.1.3-arm64-v8a.apk
+ikun-chat-mobile-v0.1.3-universal.apk
 ...
 ```
 
@@ -112,7 +112,7 @@ Push `main` 或手动 `workflow_dispatch` 触发 `.github/workflows/release.yml`
 发版前可更新版本与日志：
 
 ```bash
-npm run publish 0.1.2   # 升版本后再 push 发版
+npm run publish 0.1.3   # 升版本后再 push 发版
 ```
 
 ## 图片消息与多模态模型
