@@ -214,17 +214,21 @@ const Home = ({ componentId }: Props) => {
   }, [modelCapabilityFilter, modelQuery, models])
 
   const modelCapabilityCounts = useMemo(() => {
+    const query = modelQuery.trim().toLowerCase()
+    const queryMatchedModels = query
+      ? models.filter((item) => item.id.toLowerCase().includes(query))
+      : models
     const counts: Record<ModelCapabilityFilter, number> = {
-      all: models.length,
+      all: queryMatchedModels.length,
       vision: 0,
       text: 0,
       unknown: 0,
     }
-    models.forEach((item) => {
+    queryMatchedModels.forEach((item) => {
       counts[getModelVisionCapability(item)] += 1
     })
     return counts
-  }, [models])
+  }, [modelQuery, models])
 
   const currentModel = active?.model || defaultModel || '未选择模型'
   const currentModelId = active?.model || defaultModel || ''
