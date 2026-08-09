@@ -1440,6 +1440,10 @@ const Home = ({ componentId }: Props) => {
           renderItem={({ item }) => {
             const selected = item.id === currentModel
             const cap = getModelVisionCapability(item)
+            const query = modelQuery.trim()
+            const matchIndex = query
+              ? item.id.toLowerCase().indexOf(query.toLowerCase())
+              : -1
             return (
               <TouchableOpacity
                 style={[
@@ -1467,7 +1471,17 @@ const Home = ({ componentId }: Props) => {
                   }}
                   numberOfLines={1}
                 >
-                  {item.id}
+                  {matchIndex >= 0 ? (
+                    <>
+                      {item.id.slice(0, matchIndex)}
+                      <Text style={{ color: colors.primary, fontWeight: '800' }}>
+                        {item.id.slice(matchIndex, matchIndex + query.length)}
+                      </Text>
+                      {item.id.slice(matchIndex + query.length)}
+                    </>
+                  ) : (
+                    item.id
+                  )}
                 </Text>
                 <Text
                   style={{
