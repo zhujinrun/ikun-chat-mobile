@@ -61,6 +61,21 @@ type EditTarget = {
 
 const MAX_IMAGE_ATTACHMENTS = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+const IMAGE_PICKER_MAX_EDGE = 1600
+const IMAGE_PICKER_QUALITY = 0.8 as const
+
+type BuildImageAttachmentResult =
+  | { attachment: LX.ChatAttachment }
+  | { reason: 'tooLarge' | 'unreadable'; name?: string; size?: number }
+
+const formatFileSize = (bytes?: number) => {
+  if (!bytes) return ''
+  if (bytes >= 1024 * 1024) {
+    const mb = bytes / 1024 / 1024
+    return `${Number.isInteger(mb) ? mb : mb.toFixed(1)}MB`
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))}KB`
+}
 
 const formatConversationTime = (ts?: number) => {
   if (!ts) return ''
@@ -76,39 +91,50 @@ const formatConversationTime = (ts?: number) => {
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
-const buildImageAttachment = async (asset: Asset): Promise<LX.ChatAttachment | null> => {
+const buildImageAttachment = async (asset: Asset): Promise<BuildImageAttachmentResult> => {
   const mimeType = asset.type || 'image/jpeg'
   const dataUrl = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : undefined
   const sourceUri = asset.uri
+  const name = asset.fileName || 'image.jpg'
   const size = asset.fileSize ?? (asset.base64 ? Math.ceil((asset.base64.length * 3) / 4) : 0)
-  if (!sourceUri && !dataUrl) return null
-  if (size > MAX_IMAGE_BYTES) return null
+  if (!sourceUri && !dataUrl) return { reason: 'unreadable', name }
+  if (size > MAX_IMAGE_BYTES) return { reason: 'tooLarge', name, size }
 
-  let uri = sourceUri || dataUrl || ''
+  let uri = ''
   let remainDataUrl: string | undefined
   if (sourceUri && /^(?:file|content):/.test(sourceUri)) {
     const cached = await cacheImageTo(sourceUri)
     if (cached) {
       // 已拷贝到本地缓存目录，只存 URI + 元数据，不再把 base64 写入消息存储
       uri = cached
-    } else {
+    } else if (dataUrl) {
+      uri = dataUrl
       remainDataUrl = dataUrl
+    } else {
+      return { reason: 'unreadable', name }
     }
-  } else {
+  } else if (dataUrl) {
+    uri = dataUrl
     remainDataUrl = dataUrl
+  } else if (sourceUri) {
+    uri = sourceUri
+  } else {
+    return { reason: 'unreadable', name }
   }
-  if (!uri) return null
+  if (!uri) return { reason: 'unreadable', name }
 
   return {
-    id: createId('att_'),
-    type: 'image',
-    uri,
-    mimeType,
-    name: asset.fileName || 'image.jpg',
-    size,
-    width: asset.width,
-    height: asset.height,
-    ...(remainDataUrl ? { dataUrl: remainDataUrl } : {}),
+    attachment: {
+      id: createId('att_'),
+      type: 'image',
+      uri,
+      mimeType,
+      name,
+      size,
+      width: asset.width,
+      height: asset.height,
+      ...(remainDataUrl ? { dataUrl: remainDataUrl } : {}),
+    },
   }
 }
 
@@ -241,11 +267,11 @@ const Home = ({ componentId }: Props) => {
       const response = await launchImageLibrary({
         mediaType: 'photo',
         selectionLimit: remaining,
-        includeBase64: true,
+        includeBase64: false,
         includeExtra: true,
-        quality: 0.8,
-        maxWidth: 1600,
-        maxHeight: 1600,
+        quality: IMAGE_PICKER_QUALITY,
+        maxWidth: IMAGE_PICKER_MAX_EDGE,
+        maxHeight: IMAGE_PICKER_MAX_EDGE,
         assetRepresentationMode: 'compatible',
       })
       if (response.didCancel) return
@@ -253,14 +279,33 @@ const Home = ({ componentId }: Props) => {
         toast(response.errorMessage)
         return
       }
-      const picked = (await Promise.all((response.assets || []).map(buildImageAttachment))).filter(
-        (item): item is LX.ChatAttachment => !!item
+      const results = await Promise.all((response.assets || []).map(buildImageAttachment))
+      const picked = results
+        .filter((item): item is { attachment: LX.ChatAttachment } => 'attachment' in item)
+        .map((item) => item.attachment)
+      const skipped = results.filter(
+        (item): item is Exclude<BuildImageAttachmentResult, { attachment: LX.ChatAttachment }> =>
+          'reason' in item
       )
       if (!picked.length) {
-        toast(`图片需小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB`)
+        const hasTooLarge = skipped.some((item) => item.reason === 'tooLarge')
+        toast(
+          hasTooLarge
+            ? `图片压缩后仍需小于 ${formatFileSize(MAX_IMAGE_BYTES)}`
+            : '图片读取失败，请换一张试试'
+        )
         return
       }
       setPendingAttachments((prev) => [...prev, ...picked].slice(0, MAX_IMAGE_ATTACHMENTS))
+      if (skipped.length) {
+        const tooLarge = skipped.filter((item) => item.reason === 'tooLarge').length
+        const unreadable = skipped.length - tooLarge
+        const reasons = [
+          tooLarge ? `${tooLarge} 张压缩后仍超过 ${formatFileSize(MAX_IMAGE_BYTES)}` : '',
+          unreadable ? `${unreadable} 张不可读取` : '',
+        ].filter(Boolean)
+        toast(`已添加 ${picked.length} 张，跳过 ${skipped.length} 张：${reasons.join('，')}`)
+      }
     } catch (err: any) {
       toast(err?.message || '选择图片失败')
     } finally {
@@ -1283,7 +1328,7 @@ const Home = ({ componentId }: Props) => {
               上传图片
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-              最多 {MAX_IMAGE_ATTACHMENTS} 张，每张不超过 {MAX_IMAGE_BYTES / 1024 / 1024}MB
+              自动压缩至最长边 {IMAGE_PICKER_MAX_EDGE}px，压缩后 ≤ {formatFileSize(MAX_IMAGE_BYTES)}
             </Text>
           </View>
         </TouchableOpacity>
