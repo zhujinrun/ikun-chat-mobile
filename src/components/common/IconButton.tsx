@@ -1,9 +1,14 @@
-import { TouchableOpacity, type StyleProp, type ViewStyle } from 'react-native'
+import {
+  TouchableOpacity,
+  type GestureResponderEvent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native'
 import Icon, { type AppIconName } from './Icon'
 
 type Props = {
   name: AppIconName
-  onPress?: () => void
+  onPress?: (event: GestureResponderEvent) => void
   color?: string
   size?: number
   disabled?: boolean

@@ -175,6 +175,8 @@ const Home = ({ componentId }: Props) => {
   const [input, setInput] = useState('')
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
   const [renameText, setRenameText] = useState('')
+  const [conversationActionTarget, setConversationActionTarget] =
+    useState<LX.Conversation | null>(null)
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
@@ -318,6 +320,13 @@ const Home = ({ componentId }: Props) => {
     setRenameTarget({ id, title })
     setRenameText(title)
   }, [])
+
+  const showConversationActions = useCallback(
+    (item: LX.Conversation) => {
+      setConversationActionTarget(item)
+    },
+    []
+  )
 
   const confirmRename = useCallback(() => {
     if (!renameTarget) return
@@ -1330,24 +1339,7 @@ const Home = ({ componentId }: Props) => {
                   accessibilityRole="button"
                   accessibilityLabel={`切换到会话 ${item.title}`}
                   accessibilityState={{ selected: item.id === activeId }}
-                  onLongPress={() => {
-                    Alert.alert(item.title, undefined, [
-                      { text: '取消', style: 'cancel' },
-                      {
-                        text: item.pinned ? '取消置顶' : '置顶',
-                        onPress: () => void handleTogglePinChat(item.id, item.pinned),
-                      },
-                      {
-                        text: '重命名',
-                        onPress: () => handleRenameChat(item.id, item.title),
-                      },
-                      {
-                        text: '删除',
-                        style: 'destructive',
-                        onPress: () => handleDeleteChat(item.id, item.title),
-                      },
-                    ])
-                  }}
+                  onLongPress={() => showConversationActions(item)}
                 >
                   <View style={styles.convTitleRow}>
                     <Text style={[styles.convTitle, { color: colors.text }]} numberOfLines={1}>
@@ -1357,6 +1349,18 @@ const Home = ({ componentId }: Props) => {
                     <Text style={[styles.convTime, { color: colors.textSecondary }]}>
                       {formatConversationTime(item.updatedAt)}
                     </Text>
+                    <IconButton
+                      name="more"
+                      accessibilityLabel={`打开会话 ${item.title} 操作菜单`}
+                      color={colors.textSecondary}
+                      size={16}
+                      hitSlop={8}
+                      style={styles.convActionButton}
+                      onPress={(event) => {
+                        event.stopPropagation()
+                        showConversationActions(item)
+                      }}
+                    />
                   </View>
                   <View style={styles.convMetaRow}>
                     <Icon name="model" size={12} color={colors.textSecondary} />
@@ -1379,6 +1383,79 @@ const Home = ({ componentId }: Props) => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <AppModal
+        visible={!!conversationActionTarget}
+        title={conversationActionTarget?.title || '会话操作'}
+        placement="bottom"
+        animationType="fade"
+        onClose={() => setConversationActionTarget(null)}
+      >
+        {conversationActionTarget ? (
+          <>
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={() => {
+                const item = conversationActionTarget
+                setConversationActionTarget(null)
+                void handleTogglePinChat(item.id, item.pinned)
+              }}
+              accessibilityLabel={conversationActionTarget.pinned ? '取消置顶会话' : '置顶会话'}
+              accessibilityRole="button"
+            >
+              <Icon name="pin" size={20} color={colors.textSecondary} />
+              <View style={styles.menuRowText}>
+                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+                  {conversationActionTarget.pinned ? '取消置顶' : '置顶'}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  {conversationActionTarget.pinned ? '恢复按更新时间排序' : '固定在会话列表顶部'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={() => {
+                const item = conversationActionTarget
+                setConversationActionTarget(null)
+                handleRenameChat(item.id, item.title)
+              }}
+              accessibilityLabel="重命名会话"
+              accessibilityRole="button"
+            >
+              <Icon name="edit" size={20} color={colors.textSecondary} />
+              <View style={styles.menuRowText}>
+                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+                  重命名
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  修改会话标题
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={() => {
+                const item = conversationActionTarget
+                setConversationActionTarget(null)
+                handleDeleteChat(item.id, item.title)
+              }}
+              accessibilityLabel="删除会话"
+              accessibilityRole="button"
+            >
+              <Icon name="trash" size={20} color={colors.error} />
+              <View style={styles.menuRowText}>
+                <Text style={{ color: colors.error, fontSize: 16, fontWeight: '600' }}>
+                  删除
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  删除本会话及本地消息记录
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </>
+        ) : null}
+      </AppModal>
 
       <AppModal
         visible={modelPickerOpen}
@@ -2061,6 +2138,9 @@ const styles = StyleSheet.create({
   },
   convTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
   convTime: { fontSize: 11 },
+  convActionButton: {
+    marginRight: -4,
+  },
   convMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',

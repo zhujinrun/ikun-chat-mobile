@@ -28,6 +28,7 @@ export type AppIconName =
   | 'eye'
   | 'eye-off'
   | 'image'
+  | 'more'
 
 const ICON_MAP: Record<AppIconName, string> = {
   menu: 'menu-outline',
@@ -55,6 +56,7 @@ const ICON_MAP: Record<AppIconName, string> = {
   eye: 'eye-outline',
   'eye-off': 'eye-off-outline',
   image: 'image-outline',
+  more: 'ellipsis-horizontal',
 }
 
 type Props = {
