@@ -261,6 +261,12 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
           fontWeight: '700',
           lineHeight: Math.round(cellFont * 1.4),
         },
+        tableHint: {
+          color: muted,
+          fontSize: 11,
+          marginTop: -2,
+          marginBottom: 6,
+        },
         imageWrap: {
           marginVertical: 6,
           borderRadius: 8,
@@ -420,47 +426,49 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
       ...b.rows.map((r) => ({ cells: pad(r), header: false })),
     ]
     return (
-      <ScrollView
-        key={key}
-        horizontal
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}
-        style={{ marginVertical: 4 }}
-      >
-        <View style={styles.tableWrap}>
-          {allRows.map((row, ri) => (
-            <View
-              key={`${key}-r${ri}`}
-              style={[
-                styles.tableRow,
-                row.header && styles.tableHeaderRow,
-                ri === allRows.length - 1 && styles.tableRowLast,
-              ]}
-            >
-              {row.cells.map((cell, ci) => (
-                <View
-                  key={`${key}-r${ri}-c${ci}`}
-                  style={[styles.tableCell, ci === colCount - 1 && styles.tableCellLast]}
-                >
-                  <Text
-                    style={[
-                      row.header ? styles.tableHeaderText : styles.tableCellText,
-                      alignStyle(ci),
-                    ]}
-                    selectable
+      <View key={key}>
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator
+          style={{ marginVertical: 4 }}
+        >
+          <View style={styles.tableWrap}>
+            {allRows.map((row, ri) => (
+              <View
+                key={`${key}-r${ri}`}
+                style={[
+                  styles.tableRow,
+                  row.header && styles.tableHeaderRow,
+                  ri === allRows.length - 1 && styles.tableRowLast,
+                ]}
+              >
+                {row.cells.map((cell, ci) => (
+                  <View
+                    key={`${key}-r${ri}-c${ci}`}
+                    style={[styles.tableCell, ci === colCount - 1 && styles.tableCellLast]}
                   >
-                    {renderInlines(
-                      parseInlines(cell),
-                      `${key}-r${ri}-c${ci}`,
-                      row.header ? styles.tableHeaderText : styles.tableCellText
-                    )}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ))}
-        </View>
-      </ScrollView>
+                    <Text
+                      style={[
+                        row.header ? styles.tableHeaderText : styles.tableCellText,
+                        alignStyle(ci),
+                      ]}
+                      selectable
+                    >
+                      {renderInlines(
+                        parseInlines(cell),
+                        `${key}-r${ri}-c${ci}`,
+                        row.header ? styles.tableHeaderText : styles.tableCellText
+                      )}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+        {colCount > 3 ? <Text style={styles.tableHint}>左右滑动查看更多</Text> : null}
+      </View>
     )
   }
 
