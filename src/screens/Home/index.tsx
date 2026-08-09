@@ -164,6 +164,7 @@ const Home = ({ componentId }: Props) => {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [pendingAttachments, setPendingAttachments] = useState<LX.ChatAttachment[]>([])
+  const [brokenImageUris, setBrokenImageUris] = useState<Set<string>>(() => new Set())
   /** 输入区「+」附件菜单：提示词等次要能力 */
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   /** 全屏预览的图片 */
@@ -213,6 +214,22 @@ const Home = ({ componentId }: Props) => {
   const scrollToEnd = useCallback(() => {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
   }, [])
+
+  const markImageBroken = useCallback((uri?: string) => {
+    if (!uri) return
+    setBrokenImageUris((prev) => {
+      if (prev.has(uri)) return prev
+      const next = new Set(prev)
+      next.add(uri)
+      return next
+    })
+  }, [])
+
+  const isImageBroken = useCallback(
+    (attachment: LX.ChatAttachment | null | undefined) =>
+      !!attachment?.uri && brokenImageUris.has(attachment.uri),
+    [brokenImageUris]
+  )
 
   const handleNewChat = useCallback(async () => {
     await conversationAction.createConversation()
@@ -700,6 +717,12 @@ const Home = ({ componentId }: Props) => {
           : colors.assistantBubble
       const textColor = isUser || isError ? colors.textInverse : colors.text
       const imageAttachments = item.attachments?.filter((attachment) => attachment.type === 'image') || []
+      const renderBrokenImage = (label = '图片已失效') => (
+        <View style={styles.imageBrokenBox}>
+          <Icon name="warning" size={18} color="rgba(255,255,255,0.86)" />
+          <Text style={styles.imageBrokenText}>{label}</Text>
+        </View>
+      )
 
       return (
         <View
@@ -734,11 +757,16 @@ const Home = ({ componentId }: Props) => {
                           accessibilityLabel={attachment.name || '图片'}
                           accessibilityHint="点击查看大图，长按复制或删除"
                         >
-                          <Image
-                            source={{ uri: attachment.uri }}
-                            style={styles.messageImage}
-                            resizeMode="cover"
-                          />
+                          {isImageBroken(attachment) ? (
+                            renderBrokenImage()
+                          ) : (
+                            <Image
+                              source={{ uri: attachment.uri }}
+                              style={styles.messageImage}
+                              resizeMode="cover"
+                              onError={() => markImageBroken(attachment.uri)}
+                            />
+                          )}
                           {attachment.name ? (
                             <Text
                               style={[styles.messageImageName, { color: textColor }]}
@@ -894,6 +922,8 @@ const Home = ({ componentId }: Props) => {
       openEditMessage,
       openImagePreview,
       handleImageLongPress,
+      isImageBroken,
+      markImageBroken,
       streaming,
       streamingMessageId,
       lastMessageId,
@@ -1026,11 +1056,19 @@ const Home = ({ componentId }: Props) => {
                   accessibilityLabel={attachment.name || '待发送图片'}
                   accessibilityHint="点击查看大图"
                 >
-                  <Image
-                    source={{ uri: attachment.uri }}
-                    style={styles.pendingImage}
-                    resizeMode="cover"
-                  />
+                  {isImageBroken(attachment) ? (
+                    <View style={styles.pendingBrokenBox}>
+                      <Icon name="warning" size={16} color="#fff" />
+                      <Text style={styles.pendingBrokenText}>已失效</Text>
+                    </View>
+                  ) : (
+                    <Image
+                      source={{ uri: attachment.uri }}
+                      style={styles.pendingImage}
+                      resizeMode="cover"
+                      onError={() => markImageBroken(attachment.uri)}
+                    />
+                  )}
                   <IconButton
                     name="close"
                     accessibilityLabel={`移除${attachment.name || '图片'}`}
@@ -1488,11 +1526,19 @@ const Home = ({ componentId }: Props) => {
                   accessibilityLabel={attachment.name || '原图图片'}
                   accessibilityHint="点击查看大图"
                 >
-                  <Image
-                    source={{ uri: attachment.uri }}
-                    style={styles.pendingImage}
-                    resizeMode="cover"
-                  />
+                  {isImageBroken(attachment) ? (
+                    <View style={styles.pendingBrokenBox}>
+                      <Icon name="warning" size={16} color="#fff" />
+                      <Text style={styles.pendingBrokenText}>已失效</Text>
+                    </View>
+                  ) : (
+                    <Image
+                      source={{ uri: attachment.uri }}
+                      style={styles.pendingImage}
+                      resizeMode="cover"
+                      onError={() => markImageBroken(attachment.uri)}
+                    />
+                  )}
                   <IconButton
                     name="close"
                     accessibilityLabel={`移除原图${attachment.name || ''}`}
@@ -1540,11 +1586,20 @@ const Home = ({ componentId }: Props) => {
           />
           {previewImage ? (
             <>
-              <Image
-                source={{ uri: previewImage.uri }}
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
+              {isImageBroken(previewImage) ? (
+                <View style={styles.previewBrokenBox}>
+                  <Icon name="warning" size={28} color="#fff" />
+                  <Text style={styles.previewBrokenTitle}>图片已失效</Text>
+                  <Text style={styles.previewBrokenDesc}>缓存文件可能已被系统清理，请重新选择图片。</Text>
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: previewImage.uri }}
+                  style={styles.previewImage}
+                  resizeMode="contain"
+                  onError={() => markImageBroken(previewImage.uri)}
+                />
+              )}
               <View style={styles.previewTopBar}>
                 <Text style={styles.previewName} numberOfLines={1}>
                   {previewImage.name || '图片预览'}
@@ -1659,6 +1714,16 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'rgba(15,23,42,0.12)',
   },
+  imageBrokenBox: {
+    width: '100%',
+    height: 132,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15,23,42,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  imageBrokenText: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700' },
   messageImageName: {
     marginTop: 4,
     fontSize: 11,
@@ -1705,6 +1770,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.12)',
   },
   pendingImage: { width: '100%', height: '100%' },
+  pendingBrokenBox: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+  },
+  pendingBrokenText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   pendingRemove: {
     position: 'absolute',
     top: 2,
@@ -1851,6 +1925,20 @@ const styles = StyleSheet.create({
   previewImage: {
     flex: 1,
     width: '100%',
+  },
+  previewBrokenBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 10,
+  },
+  previewBrokenTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  previewBrokenDesc: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   previewTopBar: {
     position: 'absolute',
