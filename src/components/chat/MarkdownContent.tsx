@@ -142,15 +142,31 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
           color: muted,
           fontSize: 11,
           fontWeight: '600',
+          flex: 1,
+        },
+        codeCopyBtn: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          borderRadius: 8,
+          backgroundColor: theme.isDark ? 'rgba(59,130,246,0.14)' : 'rgba(37,99,235,0.08)',
+        },
+        codeCopyText: {
+          color: colors.primary,
+          fontSize: 11,
+          fontWeight: '700',
         },
         codeBody: {
-          padding: 10,
+          paddingVertical: 10,
         },
         codeText: {
           color,
           fontFamily: 'monospace',
           fontSize: Math.max(12, fontSize - 1),
           lineHeight: Math.max(12, fontSize - 1) * 1.45,
+          paddingHorizontal: 10,
         },
         quote: {
           borderLeftWidth: 3,
@@ -493,6 +509,7 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
                   <View style={styles.codeHeader}>
                     <Text style={styles.codeLang}>{b.lang || 'code'}</Text>
                     <TouchableOpacity
+                      style={styles.codeCopyBtn}
                       onPress={() => {
                         Clipboard.setString(b.text)
                         toast('代码已复制')
@@ -501,12 +518,15 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
                       accessibilityLabel="复制代码"
                     >
                       <Icon name="copy" size={14} color={colors.primary} />
+                      <Text style={styles.codeCopyText}>复制</Text>
                     </TouchableOpacity>
                   </View>
                   <View style={styles.codeBody}>
-                    <Text style={styles.codeText} selectable>
-                      {b.text}
-                    </Text>
+                    <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
+                      <Text style={styles.codeText} selectable>
+                        {b.text}
+                      </Text>
+                    </ScrollView>
                   </View>
                 </View>
               )
