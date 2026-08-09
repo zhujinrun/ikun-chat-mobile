@@ -59,10 +59,19 @@ type EditTarget = {
   attachments?: LX.ChatAttachment[]
 }
 
+type ModelCapabilityFilter = 'all' | VisionCapability
+
 const MAX_IMAGE_ATTACHMENTS = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const IMAGE_PICKER_MAX_EDGE = 1600
 const IMAGE_PICKER_QUALITY = 0.8 as const
+
+const MODEL_CAPABILITY_FILTERS: Array<{ key: ModelCapabilityFilter; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'vision', label: '视觉' },
+  { key: 'text', label: '仅文本' },
+  { key: 'unknown', label: '未知' },
+]
 
 type BuildImageAttachmentResult =
   | { attachment: LX.ChatAttachment }
@@ -75,6 +84,11 @@ const formatFileSize = (bytes?: number) => {
     return `${Number.isInteger(mb) ? mb : mb.toFixed(1)}MB`
   }
   return `${Math.max(1, Math.round(bytes / 1024))}KB`
+}
+
+const getModelVisionCapability = (model: LX.ModelInfo): VisionCapability => {
+  if (model.supportedVision == null) return inferVisionCapability(model.id)
+  return model.supportedVision ? 'vision' : 'text'
 }
 
 const formatConversationTime = (ts?: number) => {
@@ -156,6 +170,8 @@ const Home = ({ componentId }: Props) => {
   const [conversationQuery, setConversationQuery] = useState('')
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
+  const [modelCapabilityFilter, setModelCapabilityFilter] =
+    useState<ModelCapabilityFilter>('all')
   const [input, setInput] = useState('')
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
   const [renameText, setRenameText] = useState('')
@@ -190,9 +206,25 @@ const Home = ({ componentId }: Props) => {
 
   const filteredModels = useMemo(() => {
     const query = modelQuery.trim().toLowerCase()
-    if (!query) return models
-    return models.filter((item) => item.id.toLowerCase().includes(query))
-  }, [modelQuery, models])
+    return models.filter((item) => {
+      if (query && !item.id.toLowerCase().includes(query)) return false
+      if (modelCapabilityFilter === 'all') return true
+      return getModelVisionCapability(item) === modelCapabilityFilter
+    })
+  }, [modelCapabilityFilter, modelQuery, models])
+
+  const modelCapabilityCounts = useMemo(() => {
+    const counts: Record<ModelCapabilityFilter, number> = {
+      all: models.length,
+      vision: 0,
+      text: 0,
+      unknown: 0,
+    }
+    models.forEach((item) => {
+      counts[getModelVisionCapability(item)] += 1
+    })
+    return counts
+  }, [models])
 
   const currentModel = active?.model || defaultModel || '未选择模型'
   const currentModelId = active?.model || defaultModel || ''
@@ -1369,6 +1401,36 @@ const Home = ({ componentId }: Props) => {
             />
           ) : null}
         </View>
+        <View style={styles.modelFilterRow}>
+          {MODEL_CAPABILITY_FILTERS.map((filter) => {
+            const selected = modelCapabilityFilter === filter.key
+            return (
+              <TouchableOpacity
+                key={filter.key}
+                style={[
+                  styles.modelFilterChip,
+                  {
+                    backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
+                    borderColor: selected ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setModelCapabilityFilter(filter.key)}
+                accessibilityRole="button"
+                accessibilityLabel={`筛选${filter.label}模型`}
+                accessibilityState={{ selected }}
+              >
+                <Text
+                  style={[
+                    styles.modelFilterText,
+                    { color: selected ? '#fff' : colors.textSecondary },
+                  ]}
+                >
+                  {filter.label} {modelCapabilityCounts[filter.key]}
+                </Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
         <FlatList
           data={filteredModels}
           keyExtractor={(item) => item.id}
@@ -1377,12 +1439,7 @@ const Home = ({ componentId }: Props) => {
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => {
             const selected = item.id === currentModel
-            const cap: VisionCapability =
-              item.supportedVision == null
-                ? inferVisionCapability(item.id)
-                : item.supportedVision
-                  ? 'vision'
-                  : 'text'
+            const cap = getModelVisionCapability(item)
             return (
               <TouchableOpacity
                 style={[
@@ -1432,7 +1489,9 @@ const Home = ({ componentId }: Props) => {
           }}
           ListEmptyComponent={
             <Text style={{ color: colors.textSecondary, padding: 12 }}>
-              {modelQuery ? '未找到匹配模型' : '暂无模型，请先在设置中测试连接并刷新模型'}
+              {modelQuery || modelCapabilityFilter !== 'all'
+                ? '未找到匹配模型'
+                : '暂无模型，请先在设置中测试连接并刷新模型'}
             </Text>
           }
         />
@@ -1942,6 +2001,22 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 8,
     fontSize: 14,
+  },
+  modelFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  modelFilterChip: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  modelFilterText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   convItem: {
     paddingVertical: 12,
