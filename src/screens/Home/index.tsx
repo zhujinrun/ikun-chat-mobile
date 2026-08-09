@@ -42,6 +42,7 @@ import AppModal from '@/components/common/AppModal'
 import FormField from '@/components/common/FormField'
 import { createId } from '@/utils/id'
 import { copyImageToClipboard, cacheImageTo, deleteLocalFiles } from '@/utils/nativeModules/utils'
+import { markMediaPickerOpened, markMediaPickerSettled } from '@/utils/appResumeRepair'
 import {
   inferVisionCapability,
   visionCapabilityLabel,
@@ -235,6 +236,7 @@ const Home = ({ componentId }: Props) => {
       return
     }
     setAttachMenuOpen(false)
+    markMediaPickerOpened()
     try {
       const response = await launchImageLibrary({
         mediaType: 'photo',
@@ -261,6 +263,8 @@ const Home = ({ componentId }: Props) => {
       setPendingAttachments((prev) => [...prev, ...picked].slice(0, MAX_IMAGE_ATTACHMENTS))
     } catch (err: any) {
       toast(err?.message || '选择图片失败')
+    } finally {
+      markMediaPickerSettled()
     }
   }, [pendingAttachments.length, streaming])
 
