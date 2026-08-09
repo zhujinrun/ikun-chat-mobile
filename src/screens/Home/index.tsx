@@ -177,6 +177,7 @@ const Home = ({ componentId }: Props) => {
   const [renameText, setRenameText] = useState('')
   const [conversationActionTarget, setConversationActionTarget] =
     useState<LX.Conversation | null>(null)
+  const [messageActionTarget, setMessageActionTarget] = useState<LX.ChatMessage | null>(null)
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
@@ -720,57 +721,13 @@ const Home = ({ componentId }: Props) => {
     (item: LX.ChatMessage) => {
       if (streaming) return
       const isLast = item.id === lastMessageId
-      const buttons: {
-        text: string
-        style?: 'cancel' | 'destructive' | 'default'
-        onPress?: () => void
-      }[] = [{ text: '取消', style: 'cancel' }]
-
-      if (item.content) {
-        buttons.push({
-          text: '复制',
-          onPress: () => handleCopy(item.content),
-        })
-      }
-      if (item.role === 'user') {
-        buttons.push({
-          text: '编辑并重发',
-          onPress: () => openEditMessage(item),
-        })
-      }
-      if (canRegenerate && isLast && item.role === 'assistant') {
-        buttons.push({
-          text: '重新生成',
-          onPress: () => {
-            void handleRegenerate()
-          },
-        })
-      }
-      if (canRegenerate && isLast && item.role === 'error') {
-        buttons.push({
-          text: '重试',
-          onPress: () => {
-            void handleRetry()
-          },
-        })
-        buttons.push({
-          text: '编辑后重试',
-          onPress: openLastUserForRetryEdit,
-        })
-      }
-      if (buttons.length <= 1) return
-      Alert.alert('消息', undefined, buttons)
+      const hasMenuAction =
+        !!item.content ||
+        item.role === 'user' ||
+        (canRegenerate && isLast && (item.role === 'assistant' || item.role === 'error'))
+      if (hasMenuAction) setMessageActionTarget(item)
     },
-    [
-      streaming,
-      lastMessageId,
-      canRegenerate,
-      handleCopy,
-      openEditMessage,
-      openLastUserForRetryEdit,
-      handleRegenerate,
-      handleRetry,
-    ]
+    [streaming, lastMessageId, canRegenerate]
   )
 
   const renderMessage = useCallback(
@@ -854,19 +811,17 @@ const Home = ({ componentId }: Props) => {
               ? colors.error
               : colors.textSecondary
         return (
-        <View
-          key={key}
-          style={[
-            styles.messageActionPill,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-          accessibilityLabel={label}
-        >
-          <Icon name={icon} size={14} color={stateColor} />
-          <Text style={[styles.messageActionText, { color: stateColor }]}>
-            {label}
-          </Text>
-        </View>
+          <View
+            key={key}
+            style={[
+              styles.messageActionPill,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            accessibilityLabel={label}
+          >
+            <Icon name={icon} size={14} color={stateColor} />
+            <Text style={[styles.messageActionText, { color: stateColor }]}>{label}</Text>
+          </View>
         )
       }
       const statusPill =
@@ -1061,6 +1016,47 @@ const Home = ({ componentId }: Props) => {
     : isPendingImageTextOnly
       ? colors.error
       : colors.primary
+  const messageActionIsLast = messageActionTarget?.id === lastMessageId
+  const messageActionStatus: LX.ChatMessageStatus | undefined = messageActionTarget
+    ? messageActionTarget.role === 'error'
+      ? 'failed'
+      : messageActionTarget.status
+    : undefined
+  const messageActionFailed = messageActionStatus === 'failed'
+  const messageActionCanRegenerate =
+    !streaming && !!messageActionTarget && messageActionIsLast && canRegenerate
+  const messageActionTitle =
+    messageActionTarget?.role === 'user'
+      ? '用户消息'
+      : messageActionFailed
+        ? '失败消息'
+        : '助手消息'
+  const renderMenuAction = (
+    key: string,
+    icon: AppIconName,
+    label: string,
+    description: string,
+    onPress: () => void,
+    accessibilityLabel?: string
+  ) => (
+    <TouchableOpacity
+      key={key}
+      style={styles.menuRow}
+      onPress={onPress}
+      accessibilityLabel={accessibilityLabel || label}
+      accessibilityRole="button"
+    >
+      <Icon name={icon} size={20} color={colors.textSecondary} />
+      <View style={styles.menuRowText}>
+        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+          {label}
+        </Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+          {description}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  )
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
@@ -1298,6 +1294,88 @@ const Home = ({ componentId }: Props) => {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      <AppModal
+        visible={!!messageActionTarget}
+        title={messageActionTitle}
+        placement="bottom"
+        animationType="fade"
+        onClose={() => setMessageActionTarget(null)}
+      >
+        {messageActionTarget ? (
+          <>
+            {messageActionTarget.content
+              ? renderMenuAction(
+                  'copy',
+                  'copy',
+                  '复制',
+                  '复制这条消息内容',
+                  () => {
+                    const item = messageActionTarget
+                    setMessageActionTarget(null)
+                    handleCopy(item.content)
+                  },
+                  '复制消息'
+                )
+              : null}
+            {messageActionTarget.role === 'user'
+              ? renderMenuAction(
+                  'edit',
+                  'edit',
+                  '编辑并重发',
+                  '修改这条消息，并重新请求后续回复',
+                  () => {
+                    const item = messageActionTarget
+                    setMessageActionTarget(null)
+                    openEditMessage(item)
+                  },
+                  '编辑并重发消息'
+                )
+              : null}
+            {messageActionCanRegenerate && messageActionFailed
+              ? renderMenuAction(
+                  'retry',
+                  'retry',
+                  '重试',
+                  '使用上一条用户消息重新请求',
+                  () => {
+                    setMessageActionTarget(null)
+                    void handleRetry()
+                  },
+                  '重试生成'
+                )
+              : null}
+            {messageActionCanRegenerate && messageActionFailed
+              ? renderMenuAction(
+                  'edit-retry',
+                  'edit',
+                  '编辑后重试',
+                  '先调整上一条用户消息，再重新生成',
+                  () => {
+                    setMessageActionTarget(null)
+                    openLastUserForRetryEdit()
+                  },
+                  '编辑上一条用户消息后重试'
+                )
+              : null}
+            {messageActionCanRegenerate &&
+            messageActionTarget.role === 'assistant' &&
+            !messageActionFailed
+              ? renderMenuAction(
+                  'regenerate',
+                  'refresh',
+                  '重新生成',
+                  '基于上一条用户消息再次请求回复',
+                  () => {
+                    setMessageActionTarget(null)
+                    void handleRegenerate()
+                  },
+                  '重新生成助手回复'
+                )
+              : null}
+          </>
+        ) : null}
+      </AppModal>
 
       <Modal
         visible={drawerOpen}
@@ -1939,13 +2017,6 @@ const styles = StyleSheet.create({
   bubbleRight: { alignSelf: 'flex-end' },
   bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
   errorTitleRow: { flexDirection: 'row', alignItems: 'center' },
-  errorActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-  },
   msgActions: {
     flexDirection: 'row',
     alignItems: 'center',
