@@ -199,6 +199,9 @@ const Home = ({ componentId }: Props) => {
   /** 当前模型图片能力（用于标记与发送前提示） */
   const currentVision = inferVisionCapability(currentModelId)
   const hasPendingImage = pendingAttachments.length > 0
+  const remainingImageSlots = Math.max(0, MAX_IMAGE_ATTACHMENTS - pendingAttachments.length)
+  const remainingImageSlotsLabel =
+    remainingImageSlots > 0 ? `还可添加 ${remainingImageSlots} 张` : '已达上限'
   const isPendingImageTextOnly = hasPendingImage && currentVision === 'text'
   const needSetup = !apiUrl || !apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
@@ -275,8 +278,7 @@ const Home = ({ componentId }: Props) => {
 
   const handlePickImages = useCallback(async () => {
     if (streaming) return
-    const remaining = MAX_IMAGE_ATTACHMENTS - pendingAttachments.length
-    if (remaining <= 0) {
+    if (remainingImageSlots <= 0) {
       toast(`最多选择 ${MAX_IMAGE_ATTACHMENTS} 张图片`)
       return
     }
@@ -285,7 +287,7 @@ const Home = ({ componentId }: Props) => {
     try {
       const response = await launchImageLibrary({
         mediaType: 'photo',
-        selectionLimit: remaining,
+        selectionLimit: remainingImageSlots,
         includeBase64: false,
         includeExtra: true,
         quality: IMAGE_PICKER_QUALITY,
@@ -299,9 +301,11 @@ const Home = ({ componentId }: Props) => {
         return
       }
       const results = await Promise.all((response.assets || []).map(buildImageAttachment))
-      const picked = results
+      const validAttachments = results
         .filter((item): item is { attachment: LX.ChatAttachment } => 'attachment' in item)
         .map((item) => item.attachment)
+      const picked = validAttachments.slice(0, remainingImageSlots)
+      const overLimit = Math.max(0, validAttachments.length - picked.length)
       const skipped = results.filter(
         (item): item is Exclude<BuildImageAttachmentResult, { attachment: LX.ChatAttachment }> =>
           'reason' in item
@@ -322,15 +326,21 @@ const Home = ({ componentId }: Props) => {
         const reasons = [
           tooLarge ? `${tooLarge} 张压缩后仍超过 ${formatFileSize(MAX_IMAGE_BYTES)}` : '',
           unreadable ? `${unreadable} 张不可读取` : '',
+          overLimit ? `${overLimit} 张超过剩余名额` : '',
         ].filter(Boolean)
-        toast(`已添加 ${picked.length} 张，跳过 ${skipped.length} 张：${reasons.join('，')}`)
+        toast(`已添加 ${picked.length} 张，跳过 ${skipped.length + overLimit} 张：${reasons.join('，')}`)
+      } else if (overLimit) {
+        toast(`已添加 ${picked.length} 张，跳过 ${overLimit} 张超过剩余名额`)
+      } else if (pendingAttachments.length) {
+        const nextRemaining = Math.max(0, remainingImageSlots - picked.length)
+        toast(nextRemaining ? `已添加 ${picked.length} 张，还可添加 ${nextRemaining} 张` : '已添加图片，已达上限')
       }
     } catch (err: any) {
       toast(err?.message || '选择图片失败')
     } finally {
       markMediaPickerSettled()
     }
-  }, [pendingAttachments.length, streaming])
+  }, [pendingAttachments.length, remainingImageSlots, streaming])
 
   const removePendingAttachment = useCallback((id: string) => {
     const removed = pendingAttachments.find((item) => item.id === id)
@@ -1047,7 +1057,8 @@ const Home = ({ componentId }: Props) => {
           >
             <View style={styles.pendingHeader}>
               <Text style={[styles.pendingTitle, { color: colors.textSecondary }]}>
-                待发送图片 {pendingAttachments.length}/{MAX_IMAGE_ATTACHMENTS}
+                待发送图片 {pendingAttachments.length}/{MAX_IMAGE_ATTACHMENTS} ·{' '}
+                {remainingImageSlotsLabel}
               </Text>
               <IconButton
                 name="close"
@@ -1412,10 +1423,10 @@ const Home = ({ componentId }: Props) => {
         <TouchableOpacity
           style={styles.menuRow}
           onPress={() => void handlePickImages()}
-          disabled={streaming || pendingAttachments.length >= MAX_IMAGE_ATTACHMENTS}
+          disabled={streaming || remainingImageSlots <= 0}
           accessibilityLabel="上传图片"
           accessibilityRole="button"
-          accessibilityState={{ disabled: streaming || pendingAttachments.length >= MAX_IMAGE_ATTACHMENTS }}
+          accessibilityState={{ disabled: streaming || remainingImageSlots <= 0 }}
         >
           <Icon name="image" size={20} color={colors.textSecondary} />
           <View style={styles.menuRowText}>
@@ -1423,7 +1434,9 @@ const Home = ({ componentId }: Props) => {
               上传图片
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-              自动压缩至最长边 {IMAGE_PICKER_MAX_EDGE}px，压缩后 ≤ {formatFileSize(MAX_IMAGE_BYTES)}
+              {remainingImageSlots > 0
+                ? `${remainingImageSlotsLabel} · 自动压缩至最长边 ${IMAGE_PICKER_MAX_EDGE}px，压缩后 ≤ ${formatFileSize(MAX_IMAGE_BYTES)}`
+                : `已达 ${MAX_IMAGE_ATTACHMENTS} 张上限，可先移除一张`}
             </Text>
           </View>
         </TouchableOpacity>
