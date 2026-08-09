@@ -46,6 +46,95 @@ const normalizeContentDelta = (raw: unknown): string => {
   return ''
 }
 
+type SseConsumeResult = {
+  done: boolean
+  receivedAny: boolean
+}
+
+type StreamEmitters = {
+  emitDelta: (text: string) => void
+  emitDone: () => void
+}
+
+const parseCompletionText = (raw: string): string => {
+  if (!raw.trim()) return ''
+  try {
+    const data = JSON.parse(raw) as ChatCompletionResponse & ChatCompletionChunk
+    if (data.error?.message) throw new ApiError(data.error.message)
+    return normalizeContentDelta(
+      data.choices?.[0]?.message?.content ??
+        (data.choices?.[0] as any)?.delta?.content
+    )
+  } catch (err) {
+    if (err instanceof ApiError) throw err
+    return ''
+  }
+}
+
+const parseSseData = (
+  dataStr: string,
+  emitDelta: (text: string) => void
+): 'done' | 'delta' | 'ignore' => {
+  if (!dataStr) return 'ignore'
+  if (dataStr === '[DONE]') return 'done'
+  try {
+    const chunk = JSON.parse(dataStr) as ChatCompletionChunk
+    if (chunk.error?.message) throw new ApiError(chunk.error.message)
+    // 部分中转站 delta.content 非 string
+    const delta = normalizeContentDelta(
+      (chunk.choices?.[0] as any)?.delta?.content ??
+        (chunk.choices?.[0] as any)?.message?.content
+    )
+    if (!delta) return 'ignore'
+    emitDelta(delta)
+    return 'delta'
+  } catch (err: any) {
+    if (err instanceof ApiError) throw err
+    // 忽略无法解析的行
+    return 'ignore'
+  }
+}
+
+const createSseConsumer = (emitDelta: (text: string) => void) => {
+  let buffer = ''
+
+  const consume = (text: string): SseConsumeResult => {
+    buffer += text
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() || ''
+    let receivedAny = false
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith(':')) continue
+      if (!trimmed.startsWith('data:')) continue
+      const result = parseSseData(trimmed.slice(5).trim(), emitDelta)
+      if (result === 'done') return { done: true, receivedAny }
+      if (result === 'delta') receivedAny = true
+    }
+
+    return { done: false, receivedAny }
+  }
+
+  const flush = (): SseConsumeResult => {
+    if (!buffer.trim()) return { done: false, receivedAny: false }
+    const pending = buffer
+    buffer = ''
+    return consume(`${pending}\n`)
+  }
+
+  return { consume, flush }
+}
+
+const parseXhrErrorMessage = (raw: string, statusText: string, status: number): string => {
+  try {
+    const data = JSON.parse(raw) as { error?: { message?: string }; message?: string }
+    return data.error?.message || data.message || statusText || `HTTP ${status}`
+  } catch {
+    return statusText || `HTTP ${status}`
+  }
+}
+
 /** 非流式对话 */
 export const chatCompletions = async (
   model: string,
@@ -73,9 +162,151 @@ export const chatCompletions = async (
   return content
 }
 
+const chatCompletionsStreamXhr = async (
+  url: string,
+  headers: Record<string, string>,
+  requestBody: string,
+  emitters: StreamEmitters,
+  signal?: AbortSignal
+): Promise<boolean> => {
+  if (typeof XMLHttpRequest === 'undefined') return false
+
+  return new Promise<boolean>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const sse = createSseConsumer(emitters.emitDelta)
+    let seenLength = 0
+    let receivedAny = false
+    let settled = false
+    let doneEmitted = false
+
+    const cleanup = () => {
+      signal?.removeEventListener('abort', handleAbort)
+    }
+
+    const finish = (handled: boolean) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(handled)
+    }
+
+    const fail = (err: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(err)
+    }
+
+    const emitDoneOnce = () => {
+      if (doneEmitted) return
+      doneEmitted = true
+      emitters.emitDone()
+    }
+
+    const handleConsumeResult = (result: SseConsumeResult) => {
+      if (result.receivedAny) receivedAny = true
+      if (result.done) {
+        emitDoneOnce()
+        finish(true)
+        try {
+          xhr.abort()
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    const consumeNewText = () => {
+      if (settled || xhr.status >= 400) return
+      const text = xhr.responseText || ''
+      if (text.length <= seenLength) return
+      const chunk = text.slice(seenLength)
+      seenLength = text.length
+      handleConsumeResult(sse.consume(chunk))
+    }
+
+    function handleAbort() {
+      try {
+        xhr.abort()
+      } catch {
+        // ignore
+      }
+      finish(true)
+    }
+
+    signal?.addEventListener('abort', handleAbort, { once: true })
+
+    try {
+      xhr.open('POST', url, true)
+      for (const [key, value] of Object.entries(headers)) {
+        xhr.setRequestHeader(key, value)
+      }
+    } catch (err) {
+      fail(err)
+      return
+    }
+
+    xhr.onprogress = () => {
+      try {
+        consumeNewText()
+      } catch (err) {
+        fail(err)
+      }
+    }
+
+    xhr.onload = () => {
+      if (settled) return
+      if (xhr.status < 200 || xhr.status >= 300) {
+        fail(
+          new ApiError(
+            parseXhrErrorMessage(xhr.responseText || '', xhr.statusText, xhr.status),
+            xhr.status
+          )
+        )
+        return
+      }
+
+      try {
+        consumeNewText()
+        handleConsumeResult(sse.flush())
+        if (!receivedAny) {
+          const text = parseCompletionText(xhr.responseText || '')
+          if (text) {
+            emitters.emitDelta(text)
+            receivedAny = true
+          }
+        }
+      } catch (err) {
+        fail(err)
+        return
+      }
+
+      if (receivedAny) {
+        emitDoneOnce()
+        finish(true)
+      } else {
+        finish(false)
+      }
+    }
+
+    xhr.onerror = () => fail(new ApiError('网络请求失败'))
+    xhr.ontimeout = () => fail(new ApiError('请求超时'))
+    xhr.onabort = () => {
+      if (signal?.aborted || settled) return
+      finish(false)
+    }
+
+    try {
+      xhr.send(requestBody)
+    } catch (err) {
+      fail(err)
+    }
+  })
+}
+
 /**
  * 流式对话。
- * 优先使用 fetch + body 增量读取；若环境不支持或中途失败则回退非流式。
+ * React Native Android 的 fetch 常没有 body.getReader；优先用 XHR onprogress 做增量读取。
  */
 export const chatCompletionsStream = async (
   model: string,
@@ -113,15 +344,33 @@ export const chatCompletionsStream = async (
     return
   }
 
+  const url = `${baseUrl}/chat/completions`
+  const streamHeaders = {
+    ...buildHeaders(apiKey, extraHeaders),
+    Accept: 'text/event-stream',
+  }
+  const streamBody = JSON.stringify(buildBody(model, messages, true))
+
+  try {
+    const handledByXhr = await chatCompletionsStreamXhr(
+      url,
+      streamHeaders,
+      streamBody,
+      { emitDelta, emitDone },
+      signal
+    )
+    if (handledByXhr || signal?.aborted) return
+  } catch (err) {
+    if (signal?.aborted) return
+    throw err
+  }
+
   let res: Response
   try {
-    res = await fetch(`${baseUrl}/chat/completions`, {
+    res = await fetch(url, {
       method: 'POST',
-      headers: {
-        ...buildHeaders(apiKey, extraHeaders),
-        Accept: 'text/event-stream',
-      },
-      body: JSON.stringify(buildBody(model, messages, true)),
+      headers: streamHeaders,
+      body: streamBody,
       signal,
     })
   } catch (err: any) {
@@ -131,12 +380,12 @@ export const chatCompletionsStream = async (
 
   if (!res.ok) throw new ApiError(await parseErrorMessage(res), res.status)
 
-  // RN 部分版本 body.getReader 不可用，降级非流式
+  // 少数环境没有 XHR 或 XHR 没返回内容时，继续尝试 fetch reader / 非流式兜底
   const body = res.body as any
   if (!body || typeof body.getReader !== 'function') {
     try {
       const text = await res.text()
-      const full = parseSseToText(text)
+      const full = parseSseToText(text) || parseCompletionText(text)
       if (full) {
         emitDelta(full)
         emitDone()
@@ -172,7 +421,7 @@ export const chatCompletionsStream = async (
     }
   }
 
-  let buffer = ''
+  const sse = createSseConsumer(emitDelta)
   let receivedAny = false
 
   try {
@@ -194,35 +443,11 @@ export const chatCompletionsStream = async (
       const { done, value } = readResult
       if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith(':')) continue
-        if (!trimmed.startsWith('data:')) continue
-        const dataStr = trimmed.slice(5).trim()
-        if (dataStr === '[DONE]') {
-          emitDone()
-          return
-        }
-        try {
-          const chunk = JSON.parse(dataStr) as ChatCompletionChunk
-          if (chunk.error?.message) throw new ApiError(chunk.error.message)
-          // 部分中转站 delta.content 非 string
-          const delta = normalizeContentDelta(
-            (chunk.choices?.[0] as any)?.delta?.content ??
-              (chunk.choices?.[0] as any)?.message?.content
-          )
-          if (delta) {
-            receivedAny = true
-            emitDelta(delta)
-          }
-        } catch (err: any) {
-          if (err instanceof ApiError) throw err
-          // 忽略无法解析的行
-        }
+      const result = sse.consume(decoder.decode(value, { stream: true }))
+      if (result.receivedAny) receivedAny = true
+      if (result.done) {
+        emitDone()
+        return
       }
     }
   } finally {
@@ -233,26 +458,21 @@ export const chatCompletionsStream = async (
     }
   }
 
+  const flushed = sse.flush()
+  if (flushed.receivedAny) receivedAny = true
+  if (flushed.done) {
+    emitDone()
+    return
+  }
   emitDone()
 }
 
 const parseSseToText = (raw: string): string => {
   let out = ''
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed.startsWith('data:')) continue
-    const dataStr = trimmed.slice(5).trim()
-    if (!dataStr || dataStr === '[DONE]') continue
-    try {
-      const chunk = JSON.parse(dataStr) as ChatCompletionChunk
-      const delta = normalizeContentDelta(
-        (chunk.choices?.[0] as any)?.delta?.content ??
-          (chunk.choices?.[0] as any)?.message?.content
-      )
-      if (delta) out += delta
-    } catch {
-      // ignore
-    }
-  }
+  const sse = createSseConsumer((text) => {
+    out += text
+  })
+  sse.consume(raw)
+  sse.flush()
   return out
 }

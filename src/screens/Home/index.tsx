@@ -872,14 +872,6 @@ const Home = ({ componentId }: Props) => {
                     </View>
                   ) : null}
                 </View>
-              ) : isStreamingThis ? (
-                // 仅流式中的助手气泡用纯文本，避免半截 Markdown
-                <Text
-                  style={{ color: textColor, fontSize: fontSize, lineHeight: fontSize * 1.5 }}
-                  selectable
-                >
-                  {item.content}
-                </Text>
               ) : (
                 <MarkdownContent
                   key={`md-${item.id}`}

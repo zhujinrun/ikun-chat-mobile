@@ -302,10 +302,18 @@ const Setting = (_props: Props) => {
           keyboardType="number-pad"
         />
         <View style={styles.switchRow}>
-          <Text style={{ color: colors.text }}>流式输出</Text>
+          <View style={styles.switchTextWrap}>
+            <Text style={{ color: colors.text }}>流式输出</Text>
+            <Text style={[styles.switchHint, { color: colors.textSecondary }]}>
+              关闭后将等待完整回复返回，再一次性显示。
+            </Text>
+          </View>
           <Switch
             value={setting['chat.stream']}
-            onValueChange={(v) => settingAction.updateSetting({ 'chat.stream': v })}
+            onValueChange={(v) => {
+              settingAction.updateSetting({ 'chat.stream': v })
+              toast(v ? '已开启流式输出' : '已关闭流式输出')
+            }}
             trackColor={{ true: colors.primary }}
             accessibilityRole="switch"
             accessibilityLabel="流式输出"
@@ -435,6 +443,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+    gap: 12,
+  },
+  switchTextWrap: {
+    flex: 1,
+  },
+  switchHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3,
   },
   themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   themeChip: {
