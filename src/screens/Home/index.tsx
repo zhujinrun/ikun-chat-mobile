@@ -1357,7 +1357,9 @@ const Home = ({ componentId }: Props) => {
         <FlatList
           data={filteredModels}
           keyExtractor={(item) => item.id}
-          style={{ maxHeight: 360 }}
+          style={styles.modelList}
+          contentContainerStyle={styles.modelListContent}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => {
             const selected = item.id === currentModel
             const cap: VisionCapability =
@@ -1943,10 +1945,16 @@ const styles = StyleSheet.create({
   modelItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 9,
     paddingHorizontal: 10,
     borderRadius: 8,
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  modelList: {
+    maxHeight: 360,
+  },
+  modelListContent: {
+    paddingBottom: 36,
   },
   menuRow: {
     flexDirection: 'row',
