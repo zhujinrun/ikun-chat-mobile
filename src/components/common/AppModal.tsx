@@ -99,7 +99,7 @@ const AppModal = ({
                 />
               ) : null}
             </View>
-            <View style={bodyStyle}>{children}</View>
+            <View style={[styles.body, bodyStyle]}>{children}</View>
           </Pressable>
         </KeyboardAvoidingView>
       </Pressable>
@@ -120,10 +120,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   keyboardWrap: {
+    flex: 1,
     width: '100%',
   },
   keyboardCenter: {
     alignItems: 'center',
+    justifyContent: 'center',
   },
   keyboardBottom: {
     justifyContent: 'flex-end',
@@ -159,6 +161,9 @@ const styles = StyleSheet.create({
   },
   titleWrap: {
     flex: 1,
+  },
+  body: {
+    flexShrink: 1,
   },
   title: {
     fontSize: 18,

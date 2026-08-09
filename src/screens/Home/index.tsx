@@ -1612,26 +1612,30 @@ const Home = ({ componentId }: Props) => {
         title="本会话系统提示词"
         description="仅作用于当前会话；留空保存则使用设置里的全局默认。"
         onClose={() => setPromptModalOpen(false)}
-        contentStyle={styles.largeModal}
+        contentStyle={styles.promptModalSurface}
+        bodyStyle={styles.promptModalBody}
       >
         <FormField
           value={promptDraft}
           onChange={setPromptDraft}
           multiline
+          scrollEnabled
           placeholder="输入 system prompt…"
           accessibilityLabel="本会话系统提示词"
-          inputContainerStyle={styles.promptFieldBox}
+          containerStyle={styles.promptModalField}
+          inputContainerStyle={styles.promptModalFieldBox}
           inputStyle={{ fontSize }}
         />
         <View style={styles.promptActions}>
           <ActionButton
-            title="用全局默认"
+            title="使用全局默认"
             variant="ghost"
             compact
+            style={styles.promptDefaultAction}
             onPress={() => void clearPromptOverride()}
             accessibilityLabel="使用全局默认提示词"
           />
-          <View style={styles.modalActionsInline}>
+          <View style={styles.promptConfirmActions}>
             <ActionButton
               title="取消"
               variant="ghost"
@@ -1640,10 +1644,10 @@ const Home = ({ componentId }: Props) => {
               accessibilityLabel="取消编辑提示词"
             />
             <ActionButton
-              title="保存"
+              title="确认"
               compact
               onPress={() => void savePrompt()}
-              accessibilityLabel="保存提示词"
+              accessibilityLabel="确认保存提示词"
             />
           </View>
         </View>
@@ -2093,12 +2097,22 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 12,
   },
-  modalActionsInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   largeModal: { maxHeight: '82%' },
+  promptModalSurface: {
+    maxHeight: '88%',
+  },
+  promptModalBody: {
+    flexShrink: 1,
+  },
+  promptModalField: {
+    marginBottom: 10,
+    flexShrink: 1,
+  },
+  promptModalFieldBox: {
+    height: 160,
+    maxHeight: 160,
+    alignItems: 'flex-start',
+  },
   promptFieldBox: {
     minHeight: 140,
     maxHeight: 280,
@@ -2108,7 +2122,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
+    marginTop: 2,
+  },
+  promptDefaultAction: {
+    flexShrink: 1,
+  },
+  promptConfirmActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
+    gap: 8,
   },
   editAttachmentsBlock: {
     marginTop: 12,
