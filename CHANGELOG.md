@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.4](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.3...v0.1.4) - 2026-08-09
+
+### 修复
+
+- 修复模型较多时，模型选择弹层底部最后一项显示不完整的问题
+- 修复 React Native Android 下流式响应退化为一次性显示的问题
+
+### 优化
+
+- 压缩模型选择列表项间距，并增加底部留白
+- 设置页补充流式输出开关说明，切换时给出状态提示
+
 ## [0.1.3](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.2...v0.1.3) - 2026-08-09
 
 ### 新增
