@@ -230,6 +230,11 @@ const Home = ({ componentId }: Props) => {
     })
   }, [])
 
+  const markFailedAttachmentUris = useCallback((err: any) => {
+    const uris = Array.isArray(err?.attachmentUris) ? err.attachmentUris : []
+    uris.forEach(markImageBroken)
+  }, [markImageBroken])
+
   const isImageBroken = useCallback(
     (attachment: LX.ChatAttachment | null | undefined) =>
       !!attachment?.uri && brokenImageUris.has(attachment.uri),
@@ -369,6 +374,7 @@ const Home = ({ componentId }: Props) => {
         await chatAction.send(text, attachments)
         scrollToEnd()
       } catch (err: any) {
+        markFailedAttachmentUris(err)
         toast(err?.message || '发送失败')
       }
     }
@@ -396,7 +402,7 @@ const Home = ({ componentId }: Props) => {
       }
     }
     void doSend()
-  }, [input, pendingAttachments, streaming, ensureReady, active?.model, defaultModel, scrollToEnd])
+  }, [input, pendingAttachments, streaming, ensureReady, active?.model, defaultModel, scrollToEnd, markFailedAttachmentUris])
 
   const handleStop = useCallback(() => {
     chatAction.stop()
@@ -435,9 +441,10 @@ const Home = ({ componentId }: Props) => {
       await chatAction.regenerate()
       scrollToEnd()
     } catch (err: any) {
+      markFailedAttachmentUris(err)
       toast(err?.message || '重新生成失败')
     }
-  }, [streaming, ensureReady, scrollToEnd])
+  }, [streaming, ensureReady, scrollToEnd, markFailedAttachmentUris])
 
   const handleRetry = useCallback(async () => {
     if (streaming) return
@@ -446,9 +453,10 @@ const Home = ({ componentId }: Props) => {
       await chatAction.retry()
       scrollToEnd()
     } catch (err: any) {
+      markFailedAttachmentUris(err)
       toast(err?.message || '重试失败')
     }
-  }, [streaming, ensureReady, scrollToEnd])
+  }, [streaming, ensureReady, scrollToEnd, markFailedAttachmentUris])
 
   const canRegenerate = useMemo(() => {
     if (streaming || !messages.length) return false
@@ -540,10 +548,11 @@ const Home = ({ componentId }: Props) => {
         await chatAction.resendFrom(target.id, text, editAttachments)
         scrollToEnd()
       } catch (err: any) {
+        markFailedAttachmentUris(err)
         toast(err?.message || '重新发送失败')
       }
     }
-  }, [editTarget, editDraft, editAttachments, ensureReady, active?.model, defaultModel, scrollToEnd])
+  }, [editTarget, editDraft, editAttachments, ensureReady, active?.model, defaultModel, scrollToEnd, markFailedAttachmentUris])
 
   /** 编辑弹窗内移除某张原图附件 */
   const removeEditAttachment = useCallback((id: string) => {

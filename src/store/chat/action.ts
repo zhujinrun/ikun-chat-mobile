@@ -6,6 +6,19 @@ import conversationState from '@/store/conversation/state'
 import settingState from '@/store/setting/state'
 import state from './state'
 
+class AttachmentReadError extends Error {
+  attachmentUris: string[]
+
+  constructor(message: string, attachmentUris: string[]) {
+    super(message)
+    this.name = 'AttachmentReadError'
+    this.attachmentUris = attachmentUris.filter(Boolean)
+  }
+}
+
+const isAttachmentReadError = (err: unknown): err is AttachmentReadError =>
+  Array.isArray((err as AttachmentReadError | undefined)?.attachmentUris)
+
 /** 取一张图片附件的 dataUrl：优先旧数据里已存的 base64，否则从本地缓存文件实时读取 */
 const resolveAttachmentDataUrl = async (
   attachment: LX.ChatAttachment
@@ -17,10 +30,13 @@ const resolveAttachmentDataUrl = async (
     try {
       return await readImageDataUrl(attachment.uri)
     } catch (err: any) {
-      throw new Error(`${label}读取失败，请重新选择图片后再发送`)
+      throw new AttachmentReadError(`${label}读取失败，请重新选择图片后再发送`, [attachment.uri])
     }
   }
-  throw new Error(`${label}地址不可读取，请重新选择图片后再发送`)
+  throw new AttachmentReadError(
+    `${label}地址不可读取，请重新选择图片后再发送`,
+    attachment.uri ? [attachment.uri] : []
+  )
 }
 
 const buildUserContent = async (message: LX.ChatMessage): Promise<ApiMessage['content']> => {
@@ -81,6 +97,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
 
   let full = ''
   let failedMessage: string | null = null
+  let failedAttachmentUris: string[] = []
   let hasImageInput = false
   try {
     const messages = await buildApiMessages(conv.id)
@@ -123,6 +140,9 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       }
     } else {
       const rawMsg = err?.message || '请求失败'
+      if (isAttachmentReadError(err)) {
+        failedAttachmentUris = err.attachmentUris
+      }
       const msg = hasImageInput ? `${rawMsg}\n请确认当前模型支持图片输入。` : rawMsg
       failedMessage = msg
       if (full) {
@@ -164,7 +184,9 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
 
   // 错误已写入会话，再抛给 UI 做 toast；不再让未处理 Promise 直接打崩
   if (failedMessage) {
-    throw new Error(failedMessage)
+    const err = new Error(failedMessage) as Error & { attachmentUris?: string[] }
+    if (failedAttachmentUris.length) err.attachmentUris = failedAttachmentUris
+    throw err
   }
 }
 
