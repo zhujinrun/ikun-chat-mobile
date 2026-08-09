@@ -59,6 +59,11 @@ type EditTarget = {
   attachments?: LX.ChatAttachment[]
 }
 
+type ImageActionTarget = {
+  message: LX.ChatMessage
+  attachment: LX.ChatAttachment
+}
+
 type ModelCapabilityFilter = 'all' | VisionCapability
 
 const MAX_IMAGE_ATTACHMENTS = 4
@@ -178,6 +183,7 @@ const Home = ({ componentId }: Props) => {
   const [conversationActionTarget, setConversationActionTarget] =
     useState<LX.Conversation | null>(null)
   const [messageActionTarget, setMessageActionTarget] = useState<LX.ChatMessage | null>(null)
+  const [imageActionTarget, setImageActionTarget] = useState<ImageActionTarget | null>(null)
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
@@ -622,37 +628,9 @@ const Home = ({ componentId }: Props) => {
   const handleImageLongPress = useCallback(
     (item: LX.ChatMessage, attachment: LX.ChatAttachment) => {
       if (streaming) return
-      const buttons: {
-        text: string
-        style?: 'cancel' | 'destructive' | 'default'
-        onPress?: () => void
-      }[] = [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '复制图片',
-          onPress: () => {
-            void copyImageToClipboard(attachment.uri)
-              .then(() => toast('图片已复制到剪贴板'))
-              .catch((err: any) => toast(err?.message || '复制图片失败'))
-          },
-        },
-        { text: '查看大图', onPress: () => openImagePreview(attachment) },
-      ]
-      if (item.role === 'user' && activeId) {
-        buttons.push({
-          text: '删除图片',
-          style: 'destructive',
-          onPress: () => {
-            void conversationAction
-              .removeAttachment(activeId, item.id, attachment.id)
-              .then(() => toast('已删除图片'))
-              .catch((err: any) => toast(err?.message || '删除图片失败'))
-          },
-        })
-      }
-      Alert.alert(attachment.name || '图片', undefined, buttons)
+      setImageActionTarget({ message: item, attachment })
     },
-    [streaming, activeId, openImagePreview]
+    [streaming]
   )
 
   const openPromptModal = useCallback(async () => {
@@ -1031,32 +1009,39 @@ const Home = ({ componentId }: Props) => {
       : messageActionFailed
         ? '失败消息'
         : '助手消息'
+  const imageActionCanDelete = imageActionTarget?.message.role === 'user' && !!activeId
+  const imageActionTitle = imageActionTarget?.attachment.name || '图片'
   const renderMenuAction = (
     key: string,
     icon: AppIconName,
     label: string,
     description: string,
     onPress: () => void,
-    accessibilityLabel?: string
-  ) => (
-    <TouchableOpacity
-      key={key}
-      style={styles.menuRow}
-      onPress={onPress}
-      accessibilityLabel={accessibilityLabel || label}
-      accessibilityRole="button"
-    >
-      <Icon name={icon} size={20} color={colors.textSecondary} />
-      <View style={styles.menuRowText}>
-        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
-          {label}
-        </Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-          {description}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  )
+    accessibilityLabel?: string,
+    options?: { danger?: boolean }
+  ) => {
+    const actionColor = options?.danger ? colors.error : colors.textSecondary
+    const labelColor = options?.danger ? colors.error : colors.text
+    return (
+      <TouchableOpacity
+        key={key}
+        style={styles.menuRow}
+        onPress={onPress}
+        accessibilityLabel={accessibilityLabel || label}
+        accessibilityRole="button"
+      >
+        <Icon name={icon} size={20} color={actionColor} />
+        <View style={styles.menuRowText}>
+          <Text style={{ color: labelColor, fontSize: 16, fontWeight: '600' }}>
+            {label}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+            {description}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    )
+  }
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
@@ -1371,6 +1356,62 @@ const Home = ({ componentId }: Props) => {
                     void handleRegenerate()
                   },
                   '重新生成助手回复'
+                )
+              : null}
+          </>
+        ) : null}
+      </AppModal>
+
+      <AppModal
+        visible={!!imageActionTarget}
+        title={imageActionTitle}
+        placement="bottom"
+        animationType="fade"
+        onClose={() => setImageActionTarget(null)}
+      >
+        {imageActionTarget ? (
+          <>
+            {renderMenuAction(
+              'copy-image',
+              'copy',
+              '复制图片',
+              '复制这张图片到剪贴板',
+              () => {
+                const { attachment } = imageActionTarget
+                setImageActionTarget(null)
+                void copyImageToClipboard(attachment.uri)
+                  .then(() => toast('图片已复制到剪贴板'))
+                  .catch((err: any) => toast(err?.message || '复制图片失败'))
+              }
+            )}
+            {renderMenuAction(
+              'preview-image',
+              'image',
+              '查看大图',
+              '打开图片预览',
+              () => {
+                const { attachment } = imageActionTarget
+                setImageActionTarget(null)
+                openImagePreview(attachment)
+              }
+            )}
+            {imageActionCanDelete
+              ? renderMenuAction(
+                  'delete-image',
+                  'trash',
+                  '删除图片',
+                  '从这条用户消息中移除图片',
+                  () => {
+                    if (!activeId) return
+                    const { message, attachment } = imageActionTarget
+                    setImageActionTarget(null)
+                    void conversationAction
+                      .removeAttachment(activeId, message.id, attachment.id)
+                      .then(() => toast('已删除图片'))
+                      .catch((err: any) => toast(err?.message || '删除图片失败'))
+                  },
+                  '删除图片',
+                  { danger: true }
                 )
               : null}
           </>
