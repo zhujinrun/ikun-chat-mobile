@@ -129,18 +129,30 @@ const sanitizeMessages = (raw: unknown, conversationId: string): LX.ChatMessage[
   if (!Array.isArray(raw)) return []
   const list: LX.ChatMessage[] = []
   const validRoles = new Set(['system', 'user', 'assistant', 'error'])
+  const validStatuses = new Set(['streaming', 'stopped', 'failed'])
   for (const item of raw) {
     if (!isRecord(item)) continue
     const id = typeof item.id === 'string' ? item.id : createId('m_')
     const role = typeof item.role === 'string' && validRoles.has(item.role)
       ? (item.role as LX.ChatRole)
       : 'assistant'
+    const rawStatus =
+      typeof item.status === 'string' && validStatuses.has(item.status)
+        ? (item.status as LX.ChatMessageStatus)
+        : undefined
+    const status =
+      rawStatus === 'streaming'
+        ? 'stopped'
+        : rawStatus === 'stopped' || rawStatus === 'failed'
+          ? rawStatus
+          : undefined
     list.push({
       id,
       conversationId:
         typeof item.conversationId === 'string' ? item.conversationId : conversationId,
       role,
       content: typeof item.content === 'string' ? item.content : String(item.content ?? ''),
+      ...(status ? { status } : {}),
       attachments: sanitizeAttachments(item.attachments),
       createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
     })
@@ -272,6 +284,7 @@ export default {
       conversationId: message.conversationId,
       role: message.role,
       content: message.content,
+      status: message.status,
       attachments: message.attachments?.length ? message.attachments : undefined,
       createdAt: Date.now(),
     }
@@ -317,6 +330,30 @@ export default {
       // 落盘前先把节流队列刷出去，保证 UI 与磁盘一致
       flushScheduledMessagesUpdated(conversationId)
       await writeMessagesToStorage(conversationId)
+    } else {
+      scheduleMessagesUpdated(conversationId)
+    }
+  },
+
+  async updateMessageStatus(
+    conversationId: string,
+    messageId: string,
+    status?: LX.ChatMessageStatus,
+    persist = true
+  ) {
+    const list = state.messages[conversationId]
+    if (!list) return
+    const msg = list.find((m) => m.id === messageId)
+    if (!msg) return
+    if (status) {
+      msg.status = status
+    } else {
+      delete msg.status
+    }
+    if (persist) {
+      flushScheduledMessagesUpdated(conversationId)
+      await writeMessagesToStorage(conversationId)
+      global.state_event.messagesUpdated(conversationId)
     } else {
       scheduleMessagesUpdated(conversationId)
     }

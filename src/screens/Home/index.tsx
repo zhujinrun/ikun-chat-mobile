@@ -779,16 +779,24 @@ const Home = ({ componentId }: Props) => {
       const isError = item.role === 'error'
       const isLast = item.id === lastMessageId
       const isStreamingThis = streaming && item.id === streamingMessageId
+      const messageStatus: LX.ChatMessageStatus | undefined = isStreamingThis
+        ? 'streaming'
+        : isError
+          ? 'failed'
+          : item.status
       // 导出会话：挂在最后一条消息下方，不与输入区提示词挤在一起
       const showExport = isLast && !streaming && messages.length > 0
+      const showFailureActions =
+        !streaming && isLast && messageStatus === 'failed' && canRegenerate
       const showActions =
-        !streaming &&
+        messageStatus === 'streaming' ||
+        (!streaming &&
         (item.content ||
           isUser ||
-          (isLast && isError && canRegenerate) ||
-          (isLast && item.role === 'assistant' && canRegenerate) ||
-          showExport)
-      const showStreamingActions = isStreamingThis
+          messageStatus === 'stopped' ||
+          showFailureActions ||
+          (isLast && item.role === 'assistant' && messageStatus !== 'failed' && canRegenerate) ||
+          showExport))
 
       const bubbleBg = isError
         ? colors.error
@@ -833,7 +841,19 @@ const Home = ({ componentId }: Props) => {
           </TouchableOpacity>
         )
       }
-      const renderStatePill = (key: string, icon: AppIconName, label: string) => (
+      const renderStatePill = (
+        key: string,
+        icon: AppIconName,
+        label: string,
+        tone: 'active' | 'danger' | 'muted' = 'muted'
+      ) => {
+        const stateColor =
+          tone === 'active'
+            ? colors.primary
+            : tone === 'danger'
+              ? colors.error
+              : colors.textSecondary
+        return (
         <View
           key={key}
           style={[
@@ -842,12 +862,21 @@ const Home = ({ componentId }: Props) => {
           ]}
           accessibilityLabel={label}
         >
-          <Icon name={icon} size={14} color={colors.textSecondary} />
-          <Text style={[styles.messageActionText, { color: colors.textSecondary }]}>
+          <Icon name={icon} size={14} color={stateColor} />
+          <Text style={[styles.messageActionText, { color: stateColor }]}>
             {label}
           </Text>
         </View>
-      )
+        )
+      }
+      const statusPill =
+        messageStatus === 'streaming'
+          ? renderStatePill('status-streaming', 'thinking', '生成中', 'active')
+          : messageStatus === 'stopped'
+            ? renderStatePill('status-stopped', 'stop', '已停止')
+            : messageStatus === 'failed'
+              ? renderStatePill('status-failed', 'warning', '生成失败', 'danger')
+              : null
 
       return (
         <View
@@ -949,16 +978,6 @@ const Home = ({ componentId }: Props) => {
                       {item.content}
                     </Text>
                   ) : null}
-                  {isLast && canRegenerate ? (
-                    <View style={styles.errorActionRow}>
-                      {renderActionPill('retry', 'retry', '重试', () => void handleRetry(), {
-                        inverse: true,
-                      })}
-                      {renderActionPill('edit-retry', 'edit', '编辑后重试', openLastUserForRetryEdit, {
-                        inverse: true,
-                      })}
-                    </View>
-                  ) : null}
                 </View>
               ) : (
                 <MarkdownContent
@@ -971,27 +990,38 @@ const Home = ({ componentId }: Props) => {
             </View>
           </Pressable>
 
-          {showActions || showStreamingActions ? (
+          {showActions ? (
             <View style={[styles.msgActions, isUser && styles.msgActionsRight]}>
-              {showStreamingActions ? renderStatePill('streaming', 'thinking', '生成中') : null}
-              {showStreamingActions
+              {statusPill}
+              {messageStatus === 'streaming'
                 ? renderActionPill('stop', 'stop', '停止', handleStop)
                 : null}
-              {!showStreamingActions && item.content
+              {messageStatus !== 'streaming' && item.content
                 ? renderActionPill('copy', 'copy', '复制', () => handleCopy(item.content), {
                     muted: true,
                   })
                 : null}
-              {!showStreamingActions && isUser
+              {messageStatus !== 'streaming' && isUser
                 ? renderActionPill('edit', 'edit', '编辑', () => openEditMessage(item), {
                     accessibilityLabel: '编辑并重发',
                   })
                 : null}
-              {!showStreamingActions && isLast && item.role === 'assistant' && canRegenerate
+              {showFailureActions
+                ? renderActionPill('retry', 'retry', '重试', () => void handleRetry())
+                : null}
+              {showFailureActions
+                ? renderActionPill('edit-retry', 'edit', '编辑后重试', openLastUserForRetryEdit, {
+                    accessibilityLabel: '编辑上一条用户消息后重试',
+                  })
+                : null}
+              {messageStatus !== 'streaming' &&
+              isLast &&
+              item.role === 'assistant' &&
+              messageStatus !== 'failed' &&
+              canRegenerate
                 ? renderActionPill('regenerate', 'refresh', '重新生成', () => void handleRegenerate())
                 : null}
-              {/* 错误重试已在气泡内「图标+文字」展示，操作条不再重复 */}
-              {!showStreamingActions && showExport
+              {messageStatus !== 'streaming' && showExport
                 ? renderActionPill('export', 'export', '导出', () => void handleExport(), {
                     muted: true,
                     accessibilityLabel: '导出/分享会话',

@@ -27,6 +27,8 @@ declare global {
 
     type ChatRole = 'system' | 'user' | 'assistant' | 'error'
 
+    type ChatMessageStatus = 'streaming' | 'stopped' | 'failed'
+
     type ChatAttachmentType = 'image'
 
     type ChatAttachment = {
@@ -51,6 +53,7 @@ declare global {
       conversationId: string
       role: ChatRole
       content: string
+      status?: ChatMessageStatus
       attachments?: ChatAttachment[]
       createdAt: number
     }

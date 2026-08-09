@@ -99,6 +99,8 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   let failedMessage: string | null = null
   let failedAttachmentUris: string[] = []
   let hasImageInput = false
+  let assistantRemoved = false
+  let finalStatus: LX.ChatMessageStatus | undefined
   try {
     const messages = await buildApiMessages(conv.id)
     // 去掉刚插入的空 assistant，避免重复
@@ -135,6 +137,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
     )
   } catch (err: any) {
     if (controller.signal.aborted) {
+      finalStatus = 'stopped'
       if (!full) {
         await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）', false)
       }
@@ -146,6 +149,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       const msg = hasImageInput ? `${rawMsg}\n请确认当前模型支持图片输入。` : rawMsg
       failedMessage = msg
       if (full) {
+        finalStatus = 'failed'
         await conversationAction.updateMessageContent(
           conv.id,
           assistant.id,
@@ -153,11 +157,13 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
           false
         )
       } else {
-        await conversationAction.updateMessageContent(conv.id, assistant.id, '', false)
+        assistantRemoved = true
+        await conversationAction.removeMessage(conv.id, assistant.id)
         try {
           await conversationAction.addMessage({
             conversationId: conv.id,
             role: 'error',
+            status: 'failed',
             content: msg,
           })
         } catch (addErr) {
@@ -167,6 +173,9 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
     }
   } finally {
     try {
+      if (!assistantRemoved) {
+        await conversationAction.updateMessageStatus(conv.id, assistant.id, finalStatus, false)
+      }
       await conversationAction.flushMessages(conv.id)
     } catch (err) {
       console.error('[chat] flushMessages failed', err)
@@ -210,6 +219,7 @@ const regenerateFromUserIndex = async (conv: LX.Conversation, userIdx: number) =
   const assistant = await conversationAction.addMessage({
     conversationId: conv.id,
     role: 'assistant',
+    status: 'streaming',
     content: '',
   })
 
@@ -247,6 +257,7 @@ export default {
     const assistant = await conversationAction.addMessage({
       conversationId: conv.id,
       role: 'assistant',
+      status: 'streaming',
       content: '',
     })
 
@@ -334,6 +345,7 @@ export default {
     const assistant = await conversationAction.addMessage({
       conversationId: conv.id,
       role: 'assistant',
+      status: 'streaming',
       content: '',
     })
 
