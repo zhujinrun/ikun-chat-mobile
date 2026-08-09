@@ -34,7 +34,7 @@ import { navigations } from '@/navigation'
 import { toast } from '@/utils/toast'
 import { formatConversationText } from '@/utils/exportConversation'
 import MarkdownContent from '@/components/chat/MarkdownContent'
-import Icon from '@/components/common/Icon'
+import Icon, { type AppIconName } from '@/components/common/Icon'
 import IconButton from '@/components/common/IconButton'
 import ThinkingIndicator from '@/components/common/ThinkingIndicator'
 import ActionButton from '@/components/common/ActionButton'
@@ -730,10 +730,12 @@ const Home = ({ componentId }: Props) => {
       const showExport = isLast && !streaming && messages.length > 0
       const showActions =
         !streaming &&
-        (isUser ||
+        (item.content ||
+          isUser ||
           (isLast && isError && canRegenerate) ||
           (isLast && item.role === 'assistant' && canRegenerate) ||
           showExport)
+      const showStreamingActions = isStreamingThis
 
       const bubbleBg = isError
         ? colors.error
@@ -746,6 +748,51 @@ const Home = ({ componentId }: Props) => {
         <View style={styles.imageBrokenBox}>
           <Icon name="warning" size={18} color="rgba(255,255,255,0.86)" />
           <Text style={styles.imageBrokenText}>{label}</Text>
+        </View>
+      )
+      const renderActionPill = (
+        key: string,
+        icon: AppIconName,
+        label: string,
+        onPress: () => void,
+        options?: { inverse?: boolean; muted?: boolean; accessibilityLabel?: string }
+      ) => {
+        const actionColor = options?.inverse
+          ? textColor
+          : options?.muted
+            ? colors.textSecondary
+            : colors.primary
+        return (
+          <TouchableOpacity
+            key={key}
+            style={[
+              styles.messageActionPill,
+              options?.inverse
+                ? styles.messageActionPillInverse
+                : { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            onPress={onPress}
+            accessibilityLabel={options?.accessibilityLabel || label}
+            accessibilityRole="button"
+          >
+            <Icon name={icon} size={14} color={actionColor} />
+            <Text style={[styles.messageActionText, { color: actionColor }]}>{label}</Text>
+          </TouchableOpacity>
+        )
+      }
+      const renderStatePill = (key: string, icon: AppIconName, label: string) => (
+        <View
+          key={key}
+          style={[
+            styles.messageActionPill,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+          accessibilityLabel={label}
+        >
+          <Icon name={icon} size={14} color={colors.textSecondary} />
+          <Text style={[styles.messageActionText, { color: colors.textSecondary }]}>
+            {label}
+          </Text>
         </View>
       )
 
@@ -851,24 +898,12 @@ const Home = ({ componentId }: Props) => {
                   ) : null}
                   {isLast && canRegenerate ? (
                     <View style={styles.errorActionRow}>
-                      <TouchableOpacity
-                        style={styles.errorRetryBtn}
-                        onPress={() => void handleRetry()}
-                        accessibilityLabel="重试"
-                        accessibilityRole="button"
-                      >
-                        <Icon name="retry" size={16} color={textColor} />
-                        <Text style={[styles.errorRetryText, { color: textColor }]}>重试</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.errorRetryBtn}
-                        onPress={openLastUserForRetryEdit}
-                        accessibilityLabel="编辑后重试"
-                        accessibilityRole="button"
-                      >
-                        <Icon name="edit" size={16} color={textColor} />
-                        <Text style={[styles.errorRetryText, { color: textColor }]}>编辑后重试</Text>
-                      </TouchableOpacity>
+                      {renderActionPill('retry', 'retry', '重试', () => void handleRetry(), {
+                        inverse: true,
+                      })}
+                      {renderActionPill('edit-retry', 'edit', '编辑后重试', openLastUserForRetryEdit, {
+                        inverse: true,
+                      })}
                     </View>
                   ) : null}
                 </View>
@@ -883,45 +918,32 @@ const Home = ({ componentId }: Props) => {
             </View>
           </Pressable>
 
-          {showActions ? (
+          {showActions || showStreamingActions ? (
             <View style={[styles.msgActions, isUser && styles.msgActionsRight]}>
-              {item.content ? (
-                <IconButton
-                  name="copy"
-                  accessibilityLabel="复制"
-                  color={colors.textSecondary}
-                  size={18}
-                  onPress={() => handleCopy(item.content)}
-                />
-              ) : null}
-              {isUser ? (
-                <IconButton
-                  name="edit"
-                  accessibilityLabel="编辑并重发"
-                  color={colors.primary}
-                  size={18}
-                  onPress={() => openEditMessage(item)}
-                />
-              ) : null}
-              {isLast && item.role === 'assistant' && canRegenerate ? (
-                <IconButton
-                  name="refresh"
-                  accessibilityLabel="重新生成"
-                  color={colors.primary}
-                  size={18}
-                  onPress={() => void handleRegenerate()}
-                />
-              ) : null}
+              {showStreamingActions ? renderStatePill('streaming', 'thinking', '生成中') : null}
+              {showStreamingActions
+                ? renderActionPill('stop', 'stop', '停止', handleStop)
+                : null}
+              {!showStreamingActions && item.content
+                ? renderActionPill('copy', 'copy', '复制', () => handleCopy(item.content), {
+                    muted: true,
+                  })
+                : null}
+              {!showStreamingActions && isUser
+                ? renderActionPill('edit', 'edit', '编辑', () => openEditMessage(item), {
+                    accessibilityLabel: '编辑并重发',
+                  })
+                : null}
+              {!showStreamingActions && isLast && item.role === 'assistant' && canRegenerate
+                ? renderActionPill('regenerate', 'refresh', '重新生成', () => void handleRegenerate())
+                : null}
               {/* 错误重试已在气泡内「图标+文字」展示，操作条不再重复 */}
-              {showExport ? (
-                <IconButton
-                  name="export"
-                  accessibilityLabel="导出/分享会话"
-                  color={colors.textSecondary}
-                  size={18}
-                  onPress={() => void handleExport()}
-                />
-              ) : null}
+              {!showStreamingActions && showExport
+                ? renderActionPill('export', 'export', '导出', () => void handleExport(), {
+                    muted: true,
+                    accessibilityLabel: '导出/分享会话',
+                  })
+                : null}
             </View>
           ) : null}
         </View>
@@ -935,6 +957,7 @@ const Home = ({ componentId }: Props) => {
       handleMessageLongPress,
       handleRegenerate,
       handleRetry,
+      handleStop,
       openLastUserForRetryEdit,
       openEditMessage,
       openImagePreview,
@@ -1727,27 +1750,33 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
   },
-  errorRetryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.45)',
-    gap: 6,
-  },
-  errorRetryText: { fontSize: 14, fontWeight: '700' },
   msgActions: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
+    gap: 6,
+    marginTop: 6,
     paddingHorizontal: 2,
   },
   msgActionsRight: { justifyContent: 'flex-end' },
+  messageActionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 5,
+  },
+  messageActionPillInverse: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.45)',
+  },
+  messageActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   messageImageGrid: {
     gap: 8,
   },
