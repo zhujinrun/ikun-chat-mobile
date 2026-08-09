@@ -239,6 +239,14 @@ const Home = ({ componentId }: Props) => {
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
   const colors = theme.colors
 
+  const openModelPicker = useCallback((filter?: ModelCapabilityFilter) => {
+    if (filter) {
+      setModelQuery('')
+      setModelCapabilityFilter(filter)
+    }
+    setModelPickerOpen(true)
+  }, [])
+
   const ensureReady = useCallback(() => {
     if (needSetup) {
       toast('请先在设置中配置 API URL 和 API Key')
@@ -422,7 +430,7 @@ const Home = ({ componentId }: Props) => {
             { text: '取消', style: 'cancel' },
             {
               text: '切换模型',
-              onPress: () => setModelPickerOpen(true),
+              onPress: () => openModelPicker('vision'),
             },
             { text: '仍然发送', style: 'destructive', onPress: () => void doSend() },
           ]
@@ -434,7 +442,7 @@ const Home = ({ componentId }: Props) => {
       }
     }
     void doSend()
-  }, [input, pendingAttachments, streaming, ensureReady, active?.model, defaultModel, scrollToEnd, markFailedAttachmentUris])
+  }, [input, pendingAttachments, streaming, ensureReady, active?.model, defaultModel, scrollToEnd, markFailedAttachmentUris, openModelPicker])
 
   const handleStop = useCallback(() => {
     chatAction.stop()
@@ -1035,7 +1043,7 @@ const Home = ({ componentId }: Props) => {
         />
         <TouchableOpacity
           style={styles.headerCenter}
-          onPress={() => setModelPickerOpen(true)}
+          onPress={() => openModelPicker()}
           accessibilityLabel="选择模型"
           accessibilityRole="button"
           accessibilityState={{ expanded: modelPickerOpen }}
@@ -1175,7 +1183,7 @@ const Home = ({ componentId }: Props) => {
               {isPendingImageTextOnly ? (
                 <TouchableOpacity
                   style={[styles.pendingCapabilityAction, { borderColor: colors.error }]}
-                  onPress={() => setModelPickerOpen(true)}
+                  onPress={() => openModelPicker('vision')}
                   accessibilityLabel="切换视觉模型"
                   accessibilityRole="button"
                 >
