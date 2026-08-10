@@ -26,7 +26,7 @@ import {
 } from '@/store/conversation/hook'
 import conversationAction from '@/store/conversation/action'
 import chatAction from '@/store/chat/action'
-import { useStreaming, useStreamingMessageId } from '@/store/chat/hook'
+import { useStopping, useStreaming, useStreamingMessageId } from '@/store/chat/hook'
 import { useModels } from '@/store/model/hook'
 import settingAction from '@/store/setting/action'
 import { useSettingValue } from '@/store/setting/hook'
@@ -163,6 +163,7 @@ const Home = ({ componentId }: Props) => {
   const activeId = useActiveConversationId()
   const messages = useMessages(activeId)
   const streaming = useStreaming()
+  const stopping = useStopping()
   const streamingMessageId = useStreamingMessageId()
   const { models } = useModels()
   const defaultModel = useSettingValue('api.defaultModel')
@@ -751,11 +752,16 @@ const Home = ({ componentId }: Props) => {
         icon: AppIconName,
         label: string,
         onPress: () => void,
-        options?: { inverse?: boolean; muted?: boolean; accessibilityLabel?: string }
+        options?: {
+          inverse?: boolean
+          muted?: boolean
+          disabled?: boolean
+          accessibilityLabel?: string
+        }
       ) => {
         const actionColor = options?.inverse
           ? textColor
-          : options?.muted
+          : options?.muted || options?.disabled
             ? colors.textSecondary
             : colors.primary
         return (
@@ -766,10 +772,13 @@ const Home = ({ componentId }: Props) => {
               options?.inverse
                 ? styles.messageActionPillInverse
                 : { backgroundColor: colors.surface, borderColor: colors.border },
+              options?.disabled ? styles.disabledAction : null,
             ]}
             onPress={onPress}
+            disabled={options?.disabled}
             accessibilityLabel={options?.accessibilityLabel || label}
             accessibilityRole="button"
+            accessibilityState={options?.disabled ? { disabled: true } : undefined}
           >
             <Icon name={icon} size={14} color={actionColor} />
             <Text style={[styles.messageActionText, { color: actionColor }]}>{label}</Text>
@@ -803,7 +812,9 @@ const Home = ({ componentId }: Props) => {
         )
       }
       const statusPill =
-        messageStatus === 'streaming'
+        messageStatus === 'streaming' && stopping
+          ? renderStatePill('status-stopping', 'stop', '停止中')
+          : messageStatus === 'streaming'
           ? renderStatePill('status-streaming', 'thinking', '生成中', 'active')
           : messageStatus === 'stopped'
             ? renderStatePill('status-stopped', 'stop', '已停止')
@@ -927,7 +938,10 @@ const Home = ({ componentId }: Props) => {
             <View style={[styles.msgActions, isUser && styles.msgActionsRight]}>
               {statusPill}
               {messageStatus === 'streaming'
-                ? renderActionPill('stop', 'stop', '停止', handleStop)
+                ? renderActionPill('stop', 'stop', stopping ? '停止中' : '停止', handleStop, {
+                    disabled: stopping,
+                    accessibilityLabel: stopping ? '正在停止生成' : '停止生成',
+                  })
                 : null}
               {messageStatus !== 'streaming' && item.content
                 ? renderActionPill('copy', 'copy', '复制', () => handleCopy(item.content), {
@@ -981,6 +995,7 @@ const Home = ({ componentId }: Props) => {
       isImageBroken,
       markImageBroken,
       streaming,
+      stopping,
       streamingMessageId,
       lastMessageId,
       canRegenerate,
@@ -1255,12 +1270,18 @@ const Home = ({ componentId }: Props) => {
           />
           {streaming ? (
             <TouchableOpacity
-              style={[styles.sendBtn, { backgroundColor: colors.error }]}
+              style={[
+                styles.sendBtn,
+                { backgroundColor: stopping ? colors.surfaceSecondary : colors.error },
+                stopping ? styles.disabledAction : null,
+              ]}
               onPress={handleStop}
-              accessibilityLabel="停止生成"
+              disabled={stopping}
+              accessibilityLabel={stopping ? '正在停止生成' : '停止生成'}
               accessibilityRole="button"
+              accessibilityState={{ disabled: stopping }}
             >
-              <Icon name="stop" size={18} color="#fff" />
+              <Icon name="stop" size={18} color={stopping ? colors.textSecondary : '#fff'} />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -2080,6 +2101,9 @@ const styles = StyleSheet.create({
   messageActionPillInverse: {
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderColor: 'rgba(255,255,255,0.45)',
+  },
+  disabledAction: {
+    opacity: 0.58,
   },
   messageActionText: {
     fontSize: 12,

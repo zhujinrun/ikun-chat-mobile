@@ -87,6 +87,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   const controller = new AbortController()
   state.abortController = controller
   state.streaming = true
+  state.stopping = false
   state.streamingConversationId = conv.id
   state.streamingMessageId = assistant.id
   try {
@@ -192,6 +193,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       state.streamingMessageId === assistant.id
     ) {
       state.streaming = false
+      state.stopping = false
       state.streamingConversationId = null
       state.streamingMessageId = null
       state.abortController = null
@@ -240,6 +242,13 @@ const regenerateFromUserIndex = async (conv: LX.Conversation, userIdx: number) =
 
 export default {
   stop() {
+    if (!state.abortController || state.stopping) return
+    state.stopping = true
+    try {
+      global.state_event.streamingUpdated()
+    } catch (err) {
+      console.error('[chat] streamingUpdated failed', err)
+    }
     state.abortController?.abort()
   },
 
