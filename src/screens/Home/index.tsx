@@ -1498,7 +1498,14 @@ const Home = ({ componentId }: Props) => {
             onPress={(e) => e.stopPropagation()}
           >
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>会话</Text>
+              <View style={styles.drawerTitleWrap}>
+                <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>历史会话</Text>
+                <Text style={[styles.drawerSubtitle, { color: colors.textSecondary }]}>
+                  {conversationQuery
+                    ? `${filteredConversations.length}/${conversations.length} 个匹配`
+                    : `${conversations.length} 个会话`}
+                </Text>
+              </View>
               <IconButton
                 name="close"
                 accessibilityLabel="关闭"
@@ -1508,18 +1515,21 @@ const Home = ({ componentId }: Props) => {
               />
             </View>
             <TouchableOpacity
-              style={[styles.newChatBtn, { backgroundColor: colors.primary }]}
+              style={[
+                styles.newChatBtn,
+                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+              ]}
               onPress={() => void handleNewChat()}
-              accessibilityLabel="新对话"
+              accessibilityLabel="新建对话"
               accessibilityRole="button"
             >
-              <Icon name="add" size={20} color="#fff" />
-              <Text style={styles.newChatText}>新对话</Text>
+              <Icon name="add" size={18} color={colors.primary} />
+              <Text style={[styles.newChatText, { color: colors.text }]}>新建对话</Text>
             </TouchableOpacity>
             <View
               style={[
                 styles.drawerSearch,
-                { backgroundColor: colors.inputBg, borderColor: colors.border },
+                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
               ]}
             >
               <Icon name="search" size={16} color={colors.textSecondary} />
@@ -1546,11 +1556,17 @@ const Home = ({ componentId }: Props) => {
             <FlatList
               data={filteredConversations}
               keyExtractor={(item) => item.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.drawerListContent}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
                     styles.convItem,
-                    item.id === activeId && { backgroundColor: colors.surfaceSecondary },
+                    {
+                      borderColor: item.id === activeId ? colors.primary : 'transparent',
+                      backgroundColor:
+                        item.id === activeId ? colors.surfaceSecondary : 'transparent',
+                    },
                   ]}
                   onPress={() => void handleSelectChat(item.id)}
                   accessibilityRole="button"
@@ -1592,7 +1608,7 @@ const Home = ({ componentId }: Props) => {
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
-                <Text style={{ color: colors.textSecondary, padding: 12 }}>
+                <Text style={[styles.drawerEmptyText, { color: colors.textSecondary }]}>
                   {conversationQuery ? '未找到匹配会话' : '暂无会话'}
                 </Text>
               }
@@ -2345,35 +2361,44 @@ const styles = StyleSheet.create({
   },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
   drawer: {
-    width: '78%',
-    maxWidth: 320,
+    width: '80%',
+    maxWidth: 332,
     height: '100%',
-    paddingTop: 48,
+    paddingTop: 46,
     paddingHorizontal: 12,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 10,
   },
-  modalHeaderTitle: { fontSize: 18, fontWeight: '700', flex: 1, paddingRight: 8 },
+  drawerTitleWrap: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  modalHeaderTitle: { fontSize: 17, fontWeight: '700' },
+  drawerSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   newChatBtn: {
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 6,
-    marginBottom: 12,
-  },
-  newChatText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  drawerSearch: {
-    minHeight: 40,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 10,
     marginBottom: 10,
+  },
+  newChatText: { fontWeight: '700', fontSize: 14 },
+  drawerSearch: {
+    minHeight: 38,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 19,
+    paddingHorizontal: 11,
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -2382,6 +2407,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 8,
     fontSize: 14,
+  },
+  drawerListContent: {
+    paddingBottom: 28,
   },
   modelFilterRow: {
     flexDirection: 'row',
@@ -2400,10 +2428,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   convItem: {
-    paddingVertical: 12,
+    paddingVertical: 9,
     paddingHorizontal: 10,
-    borderRadius: 8,
-    marginBottom: 4,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 2,
   },
   convTitleRow: {
     flexDirection: 'row',
@@ -2413,15 +2442,21 @@ const styles = StyleSheet.create({
   convTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
   convTime: { fontSize: 11 },
   convActionButton: {
-    marginRight: -4,
+    marginRight: -6,
   },
   convMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 4,
+    marginTop: 3,
   },
   convMetaText: { flex: 1, fontSize: 12 },
+  drawerEmptyText: {
+    paddingHorizontal: 10,
+    paddingVertical: 20,
+    fontSize: 13,
+    textAlign: 'center',
+  },
   modelItem: {
     flexDirection: 'row',
     alignItems: 'center',
