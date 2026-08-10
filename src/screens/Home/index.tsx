@@ -1148,7 +1148,7 @@ const Home = ({ componentId }: Props) => {
       <View
         style={[
           styles.header,
-          { backgroundColor: colors.surface, borderBottomColor: colors.border },
+          { backgroundColor: colors.background },
         ]}
       >
         <IconButton
@@ -1156,11 +1156,17 @@ const Home = ({ componentId }: Props) => {
           accessibilityLabel="菜单"
           color={colors.primary}
           size={24}
-          style={styles.headerBtn}
+          style={[styles.headerBtn, { backgroundColor: colors.surface }]}
           onPress={() => setDrawerOpen(true)}
         />
         <TouchableOpacity
-          style={styles.headerCenter}
+          style={[
+            styles.headerCenter,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
           onPress={() => openModelPicker()}
           accessibilityLabel="选择模型"
           accessibilityRole="button"
@@ -1183,7 +1189,7 @@ const Home = ({ componentId }: Props) => {
           accessibilityLabel="设置"
           color={colors.primary}
           size={24}
-          style={styles.headerBtn}
+          style={[styles.headerBtn, { backgroundColor: colors.surface }]}
           onPress={() => void navigations.pushSettingScreen(componentId)}
         />
       </View>
@@ -1218,10 +1224,26 @@ const Home = ({ componentId }: Props) => {
         }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>开始对话</Text>
+            <Text style={[styles.emptyBrand, { color: colors.primary }]}>IKUN Chat</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>今天想聊点什么？</Text>
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              配置中转站后即可聊天。支持 Markdown、编辑重发、重新生成与错误重试。
+              聚焦输入，支持 Markdown、图片消息、编辑重发与重新生成。
             </Text>
+            <TouchableOpacity
+              style={[
+                styles.emptyModelPill,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+              onPress={() => openModelPicker()}
+              accessibilityLabel="选择模型"
+              accessibilityRole="button"
+            >
+              <Icon name="model" size={14} color={colors.primary} />
+              <Text style={[styles.emptyModelText, { color: colors.text }]} numberOfLines={1}>
+                {currentModel}
+              </Text>
+              <Icon name="chevron-down" size={14} color={colors.textSecondary} />
+            </TouchableOpacity>
           </View>
         }
       />
@@ -1234,7 +1256,7 @@ const Home = ({ componentId }: Props) => {
           <View
             style={[
               styles.pendingPanel,
-              { backgroundColor: colors.surface, borderTopColor: colors.border },
+              { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
             <View style={styles.pendingHeader}>
@@ -1317,7 +1339,7 @@ const Home = ({ componentId }: Props) => {
         <View
           style={[
             styles.composer,
-            { backgroundColor: colors.surface, borderTopColor: colors.border },
+            { backgroundColor: colors.surface, borderColor: colors.border },
           ]}
         >
           <IconButton
@@ -1332,13 +1354,12 @@ const Home = ({ componentId }: Props) => {
             style={[
               styles.input,
               {
-                backgroundColor: colors.inputBg,
+                backgroundColor: 'transparent',
                 color: colors.text,
-                borderColor: colors.border,
                 fontSize,
               },
             ]}
-            placeholder="输入消息…"
+            placeholder="问点什么…"
             placeholderTextColor={colors.textSecondary}
             value={input}
             onChangeText={setInput}
@@ -2066,14 +2087,32 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 8 : 10,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 8 : 12,
+    gap: 8,
   },
-  headerBtn: { paddingHorizontal: 8, paddingVertical: 4 },
-  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
-  headerTitle: { fontSize: 16, fontWeight: '700' },
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitle: { fontSize: 15, fontWeight: '700' },
   headerSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2093,18 +2132,18 @@ const styles = StyleSheet.create({
   bannerText: { color: '#92400E', flex: 1, fontSize: 13 },
   bannerActionRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 8 },
   bannerAction: { color: '#B45309', fontWeight: '700' },
-  listContent: { padding: 12, paddingBottom: 24, flexGrow: 1 },
-  bubbleWrap: { marginVertical: 4, maxWidth: '88%' },
+  listContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, flexGrow: 1 },
+  bubbleWrap: { marginVertical: 6, maxWidth: '86%' },
   bubbleLeft: { alignSelf: 'flex-start' },
   bubbleRight: { alignSelf: 'flex-end' },
-  bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  bubble: { borderRadius: 18, paddingHorizontal: 13, paddingVertical: 11 },
   errorTitleRow: { flexDirection: 'row', alignItems: 'center' },
   msgActions: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 6,
+    gap: 5,
+    marginTop: 5,
     paddingHorizontal: 2,
   },
   msgActionsRight: { justifyContent: 'flex-end' },
@@ -2112,8 +2151,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 9,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 5,
@@ -2126,7 +2165,7 @@ const styles = StyleSheet.create({
     opacity: 0.58,
   },
   messageActionText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   messageImageGrid: {
@@ -2162,16 +2201,42 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 80,
+    paddingTop: 56,
     paddingHorizontal: 32,
   },
-  emptyTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
-  emptyDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  emptyBrand: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0,
+    marginBottom: 8,
+  },
+  emptyTitle: { fontSize: 26, fontWeight: '800', marginBottom: 10, textAlign: 'center' },
+  emptyDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22, maxWidth: 280 },
+  emptyModelPill: {
+    marginTop: 18,
+    maxWidth: '92%',
+    minHeight: 38,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  emptyModelText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   pendingPanel: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 2,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
   pendingHeader: {
     flexDirection: 'row',
@@ -2183,14 +2248,14 @@ const styles = StyleSheet.create({
   pendingGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 7,
   },
   pendingCapabilityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 6,
+    marginTop: 8,
   },
   pendingHint: {
     flexShrink: 1,
@@ -2208,9 +2273,9 @@ const styles = StyleSheet.create({
   },
   pendingCapabilityActionText: { fontSize: 11, fontWeight: '700' },
   pendingItem: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
+    width: 68,
+    height: 68,
+    borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: 'rgba(15,23,42,0.12)',
   },
@@ -2234,26 +2299,35 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 6,
+    marginHorizontal: 12,
+    marginTop: 2,
+    marginBottom: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   input: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 38,
     maxHeight: 120,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderWidth: 0,
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
   },
   sendBtn: {
-    borderRadius: 12,
-    width: 42,
-    height: 42,
+    borderRadius: 20,
+    width: 38,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
   },
   modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
   drawer: {
