@@ -824,6 +824,7 @@ const Home = ({ componentId }: Props) => {
     ({ item }: { item: LX.ChatMessage }) => {
       const isUser = item.role === 'user'
       const isError = item.role === 'error'
+      const isAssistant = !isUser && !isError
       const isLast = item.id === lastMessageId
       const isStreamingThis = streaming && item.id === streamingMessageId
       const messageStatus = getMessageStatus(item, isStreamingThis)
@@ -840,7 +841,7 @@ const Home = ({ componentId }: Props) => {
         ? colors.error
         : isUser
           ? colors.userBubble
-          : colors.assistantBubble
+          : 'transparent'
       const textColor = isUser || isError ? colors.textInverse : colors.text
       const imageAttachments = item.attachments?.filter((attachment) => attachment.type === 'image') || []
       const renderBrokenImage = (label = '图片已失效') => (
@@ -926,16 +927,21 @@ const Home = ({ componentId }: Props) => {
 
       return (
         <View
-          style={[styles.bubbleWrap, isUser ? styles.bubbleRight : styles.bubbleLeft]}
+          style={[
+            styles.bubbleWrap,
+            isUser ? styles.bubbleRight : styles.bubbleLeft,
+            isAssistant ? styles.assistantWrap : null,
+          ]}
         >
           <Pressable onLongPress={() => handleMessageLongPress(item)}>
             <View
               style={[
                 styles.bubble,
+                isAssistant ? styles.assistantBubbleFlat : null,
                 {
                   backgroundColor: bubbleBg,
-                  borderColor: colors.border,
-                  borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
+                  borderColor: isAssistant ? 'transparent' : colors.border,
+                  borderWidth: isAssistant || isUser ? 0 : StyleSheet.hairlineWidth,
                 },
               ]}
             >
@@ -2136,7 +2142,15 @@ const styles = StyleSheet.create({
   bubbleWrap: { marginVertical: 6, maxWidth: '86%' },
   bubbleLeft: { alignSelf: 'flex-start' },
   bubbleRight: { alignSelf: 'flex-end' },
+  assistantWrap: {
+    alignSelf: 'stretch',
+    maxWidth: '100%',
+  },
   bubble: { borderRadius: 18, paddingHorizontal: 13, paddingVertical: 11 },
+  assistantBubbleFlat: {
+    paddingHorizontal: 0,
+    paddingVertical: 6,
+  },
   errorTitleRow: { flexDirection: 'row', alignItems: 'center' },
   msgActions: {
     flexDirection: 'row',
@@ -2151,8 +2165,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    paddingVertical: 5,
-    paddingHorizontal: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 7,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 5,
@@ -2178,13 +2192,13 @@ const styles = StyleSheet.create({
   messageImage: {
     width: '100%',
     height: 132,
-    borderRadius: 10,
+    borderRadius: 14,
     backgroundColor: 'rgba(15,23,42,0.12)',
   },
   imageBrokenBox: {
     width: '100%',
     height: 132,
-    borderRadius: 10,
+    borderRadius: 14,
     backgroundColor: 'rgba(15,23,42,0.28)',
     alignItems: 'center',
     justifyContent: 'center',
