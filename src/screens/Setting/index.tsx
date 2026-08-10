@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  useWindowDimensions,
 } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import { useSetting } from '@/store/setting/hook'
@@ -16,6 +17,7 @@ import modelAction from '@/store/model/action'
 import { useModels } from '@/store/model/hook'
 import stationAction from '@/store/station/action'
 import { useStations } from '@/store/station/hook'
+import { useConversations } from '@/store/conversation/hook'
 import { inferVisionCapability, visionCapabilityLabel } from '@/utils/modelCapability'
 import { themeList } from '@/theme/themes'
 import { toast } from '@/utils/toast'
@@ -59,7 +61,11 @@ const Setting = (_props: Props) => {
   const theme = useTheme()
   const setting = useSetting()
   const { stations, defaultId } = useStations()
+  const conversations = useConversations()
+  const stationPagerRef = useRef<ScrollView>(null)
+  const { width: windowWidth } = useWindowDimensions()
   const colors = theme.colors
+  const stationCardWidth = Math.max(260, windowWidth - 60)
 
   const [selectedStationId, setSelectedStationId] = useState<string | null>(defaultId)
   const selectedStation = useMemo(
@@ -70,7 +76,27 @@ const Setting = (_props: Props) => {
       null,
     [defaultId, selectedStationId, stations]
   )
+  const selectedStationIndex = useMemo(() => {
+    const index = stations.findIndex((item) => item.id === selectedStation?.id)
+    return index >= 0 ? index : 0
+  }, [selectedStation?.id, stations])
   const { models, loading, error } = useModels(selectedStation?.id)
+  const stationUsageCounts = useMemo(() => {
+    return conversations.reduce<Record<string, number>>((acc, item) => {
+      if (!item.stationId) return acc
+      acc[item.stationId] = (acc[item.stationId] || 0) + 1
+      return acc
+    }, {})
+  }, [conversations])
+  const selectedUsageCount = selectedStation ? stationUsageCounts[selectedStation.id] || 0 : 0
+  const selectedIsDefault = !!selectedStation && selectedStation.id === defaultId
+  const deleteDisabled = stations.length <= 1 || selectedIsDefault || selectedUsageCount > 0
+  const deleteDisabledReason =
+    stations.length <= 1
+      ? '至少保留一个中转站，当前不能删除。'
+      : selectedUsageCount > 0
+        ? `当前中转站已被 ${selectedUsageCount} 个会话使用，不能删除。`
+        : ''
 
   const [stationName, setStationName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
@@ -88,6 +114,13 @@ const Setting = (_props: Props) => {
       setSelectedStationId(selectedStation.id)
     }
   }, [selectedStation, selectedStationId])
+
+  useEffect(() => {
+    stationPagerRef.current?.scrollTo({
+      x: selectedStationIndex * stationCardWidth,
+      animated: true,
+    })
+  }, [selectedStationIndex, stationCardWidth])
 
   useEffect(() => {
     if (!selectedStation) return
@@ -202,9 +235,33 @@ const Setting = (_props: Props) => {
     toast(`默认中转站：${selectedStation.name}`)
   }, [selectedStation])
 
+  const handleStationPageChange = useCallback(
+    (offsetX: number) => {
+      if (!stations.length) return
+      const index = Math.max(0, Math.min(stations.length - 1, Math.round(offsetX / stationCardWidth)))
+      const station = stations[index]
+      if (station && station.id !== selectedStationId) {
+        setSelectedStationId(station.id)
+      }
+    },
+    [selectedStationId, stationCardWidth, stations]
+  )
+
   const deleteStation = useCallback(() => {
     if (!selectedStation) return
-    Alert.alert('删除中转站', `确定删除「${selectedStation.name}」？`, [
+    if (stations.length <= 1) {
+      toast('至少保留一个中转站')
+      return
+    }
+    if (selectedIsDefault) {
+      toast('默认中转站不能删除，请先切换默认中转站')
+      return
+    }
+    if (selectedUsageCount > 0) {
+      toast(`当前中转站已被 ${selectedUsageCount} 个会话使用，不能删除`)
+      return
+    }
+    Alert.alert('删除中转站', `确定删除「${selectedStation.name}」？未被会话使用的中转站才可删除。`, [
       { text: '取消', style: 'cancel' },
       {
         text: '删除',
@@ -220,7 +277,7 @@ const Setting = (_props: Props) => {
         },
       },
     ])
-  }, [selectedStation])
+  }, [selectedIsDefault, selectedStation, selectedUsageCount, stations.length])
 
   return (
     <ScrollView
@@ -244,6 +301,7 @@ const Setting = (_props: Props) => {
           {stations.map((station) => {
             const selected = station.id === selectedStation?.id
             const isDefault = station.id === defaultId
+            const usageCount = stationUsageCounts[station.id] || 0
             return (
               <TouchableOpacity
                 key={station.id}
@@ -256,7 +314,7 @@ const Setting = (_props: Props) => {
                 ]}
                 onPress={() => setSelectedStationId(station.id)}
                 accessibilityRole="button"
-                accessibilityLabel={`${selected ? '当前' : '切换到'}中转站 ${station.name}${isDefault ? '，默认' : ''}`}
+                accessibilityLabel={`${selected ? '当前' : '切换到'}中转站 ${station.name}${isDefault ? '，默认' : ''}，${usageCount} 个会话使用`}
                 accessibilityState={{ selected }}
               >
                 <Text
@@ -275,10 +333,21 @@ const Setting = (_props: Props) => {
                     默认
                   </Text>
                 ) : null}
+                <Text
+                  style={[
+                    styles.stationChipMeta,
+                    { color: selected ? 'rgba(255,255,255,0.82)' : colors.textSecondary },
+                  ]}
+                >
+                  {usageCount} 会话
+                </Text>
               </TouchableOpacity>
             )
           })}
         </View>
+        <Text style={[styles.stationRuleHint, { color: colors.textSecondary }]}>
+          默认中转站只影响新建会话，已有会话会继续使用创建时绑定的中转站。
+        </Text>
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, { backgroundColor: connectionStatus.tone }]} />
           <View style={styles.statusTextWrap}>
@@ -350,25 +419,34 @@ const Setting = (_props: Props) => {
             style={[styles.saveButton, { backgroundColor: colors.primaryDark }]}
             accessibilityLabel="测试连接并刷新模型"
           />
-          <ActionButton
-            title="设默认"
-            variant="secondary"
-            compact
-            onPress={() => void setDefaultStation()}
-            disabled={!selectedStation || selectedStation.id === defaultId}
-            style={styles.saveButton}
-            accessibilityLabel="设为默认中转站"
-          />
-          <ActionButton
-            title="删除"
-            variant="danger"
-            compact
-            onPress={deleteStation}
-            disabled={stations.length <= 1}
-            style={styles.saveButton}
-            accessibilityLabel="删除中转站"
-          />
+          {!selectedIsDefault ? (
+            <>
+              <ActionButton
+                title="设默认"
+                variant="secondary"
+                compact
+                onPress={() => void setDefaultStation()}
+                disabled={!selectedStation}
+                style={styles.saveButton}
+                accessibilityLabel="设为默认中转站"
+              />
+              <ActionButton
+                title="删除"
+                variant="danger"
+                compact
+                onPress={deleteStation}
+                disabled={deleteDisabled}
+                style={styles.saveButton}
+                accessibilityLabel={deleteDisabledReason || '删除中转站'}
+              />
+            </>
+          ) : null}
         </View>
+        {deleteDisabledReason ? (
+          <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
+            {deleteDisabledReason}
+          </Text>
+        ) : null}
         <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
           已缓存模型：{models.length} 个
           {selectedStation?.defaultModel ? ` · 默认 ${selectedStation.defaultModel}` : ''}
@@ -619,6 +697,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    marginBottom: 8,
+  },
+  stationRuleHint: {
+    fontSize: 12,
+    lineHeight: 18,
     marginBottom: 12,
   },
   stationChip: {
