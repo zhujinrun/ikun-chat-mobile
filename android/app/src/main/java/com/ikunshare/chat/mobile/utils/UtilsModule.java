@@ -9,12 +9,14 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.database.Cursor;
 import android.graphics.Rect;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.Window;
 import android.view.WindowManager;
@@ -24,6 +26,8 @@ import androidx.core.content.FileProvider;
 import androidx.core.os.LocaleListCompat;
 
 import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.ActivityEventListener;
+import com.facebook.react.bridge.BaseActivityEventListener;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -38,21 +42,41 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Objects;
 
 public class UtilsModule extends ReactContextBaseJavaModule {
+  private static final int PICK_FILES_REQUEST = 8301;
+
   private final ReactApplicationContext reactContext;
+  private Promise pickFilesPromise;
+  private long pickFilesMaxBytes = 0;
 
   private int listenerCount = 0;
 
   UtilsEvent utilsEvent;
 
+  private final ActivityEventListener activityEventListener = new BaseActivityEventListener() {
+    @Override
+    public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+      if (requestCode != PICK_FILES_REQUEST) return;
+      handlePickFilesResult(resultCode, data);
+    }
+  };
+
   UtilsModule(ReactApplicationContext reactContext) {
     super(reactContext);
     this.reactContext = reactContext;
     utilsEvent = new UtilsEvent(reactContext);
+    reactContext.addActivityEventListener(activityEventListener);
     registerScreenBroadcastReceiver();
+  }
+
+  @Override
+  public void invalidate() {
+    reactContext.removeActivityEventListener(activityEventListener);
+    super.invalidate();
   }
 
   @Override
@@ -353,6 +377,167 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     }).start();
   }
 
+  /** 打开系统文件选择器，选择文本类文件并复制到应用内部 cache/attachments 目录。 */
+  @ReactMethod
+  public void pickFiles(ReadableArray mimeTypes, double maxBytes, Promise promise) {
+    Activity currentActivity = getCurrentActivity();
+    if (currentActivity == null) {
+      promise.reject("NO_ACTIVITY", "当前无法打开文件选择器");
+      return;
+    }
+    if (pickFilesPromise != null) {
+      promise.reject("PICKER_BUSY", "文件选择器正在打开");
+      return;
+    }
+    try {
+      Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+      intent.addCategory(Intent.CATEGORY_OPENABLE);
+      intent.setType("*/*");
+      intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+      if (mimeTypes != null && mimeTypes.size() > 0) {
+        String[] types = new String[mimeTypes.size()];
+        for (int i = 0; i < mimeTypes.size(); i++) {
+          types[i] = mimeTypes.getString(i);
+        }
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, types);
+      }
+      pickFilesPromise = promise;
+      pickFilesMaxBytes = Math.max(1, (long) maxBytes);
+      currentActivity.startActivityForResult(
+        Intent.createChooser(intent, "选择文件"),
+        PICK_FILES_REQUEST
+      );
+    } catch (Exception e) {
+      pickFilesPromise = null;
+      promise.reject("PICK_FILES", e.getMessage() != null ? e.getMessage() : "打开文件选择器失败");
+    }
+  }
+
+  private void handlePickFilesResult(int resultCode, Intent data) {
+    Promise promise = pickFilesPromise;
+    long maxBytes = pickFilesMaxBytes;
+    pickFilesPromise = null;
+    pickFilesMaxBytes = 0;
+    if (promise == null) return;
+
+    if (resultCode != Activity.RESULT_OK || data == null) {
+      WritableMap result = Arguments.createMap();
+      result.putBoolean("didCancel", true);
+      result.putArray("files", Arguments.createArray());
+      result.putArray("skipped", Arguments.createArray());
+      promise.resolve(result);
+      return;
+    }
+
+    new Thread(() -> {
+      WritableArray files = Arguments.createArray();
+      WritableArray skipped = Arguments.createArray();
+      try {
+        ClipData clipData = data.getClipData();
+        if (clipData != null) {
+          for (int i = 0; i < clipData.getItemCount(); i++) {
+            cachePickedFile(clipData.getItemAt(i).getUri(), maxBytes, files, skipped);
+          }
+        } else if (data.getData() != null) {
+          cachePickedFile(data.getData(), maxBytes, files, skipped);
+        }
+        WritableMap result = Arguments.createMap();
+        result.putBoolean("didCancel", false);
+        result.putArray("files", files);
+        result.putArray("skipped", skipped);
+        promise.resolve(result);
+      } catch (Exception e) {
+        Log.e("Utils", "pickFiles result error", e);
+        promise.reject("PICK_FILES", e.getMessage() != null ? e.getMessage() : "读取文件失败");
+      }
+    }).start();
+  }
+
+  private void cachePickedFile(
+    Uri uri,
+    long maxBytes,
+    WritableArray files,
+    WritableArray skipped
+  ) {
+    if (uri == null) {
+      skipped.pushMap(buildSkippedFile("文件", 0, "unreadable"));
+      return;
+    }
+    String name = queryDisplayName(uri);
+    long declaredSize = queryFileSize(uri);
+    String mime = reactContext.getContentResolver().getType(uri);
+    if (mime == null || mime.isEmpty()) mime = guessMimeFromName(name);
+
+    if (declaredSize > maxBytes) {
+      skipped.pushMap(buildSkippedFile(name, declaredSize, "tooLarge"));
+      return;
+    }
+
+    File outFile = null;
+    try {
+      File dir = new File(reactContext.getCacheDir(), "attachments");
+      if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建缓存目录");
+      String safeName = sanitizeFileName(name);
+      outFile = new File(
+        dir,
+        "file_" + System.currentTimeMillis() + "_" + (int) (Math.random() * 100000) + "_" + safeName
+      );
+      InputStream input = reactContext.getContentResolver().openInputStream(uri);
+      if (input == null) throw new Exception("无法读取文件");
+      FileOutputStream output = new FileOutputStream(outFile);
+      byte[] chunk = new byte[8192];
+      long total = 0;
+      int read;
+      while ((read = input.read(chunk)) != -1) {
+        total += read;
+        if (total > maxBytes) {
+          input.close();
+          output.close();
+          if (outFile.exists()) outFile.delete();
+          skipped.pushMap(buildSkippedFile(name, total, "tooLarge"));
+          return;
+        }
+        output.write(chunk, 0, read);
+      }
+      input.close();
+      output.flush();
+      output.close();
+
+      WritableMap file = Arguments.createMap();
+      file.putString("uri", "file://" + outFile.getAbsolutePath());
+      file.putString("name", safeName);
+      file.putString("mimeType", mime);
+      file.putDouble("size", total);
+      files.pushMap(file);
+    } catch (Exception e) {
+      if (outFile != null && outFile.exists()) outFile.delete();
+      skipped.pushMap(buildSkippedFile(name, Math.max(0, declaredSize), "unreadable"));
+    }
+  }
+
+  @ReactMethod
+  public void readTextFile(String uriStr, double maxBytes, Promise promise) {
+    new Thread(() -> {
+      try {
+        if (uriStr == null || uriStr.isEmpty()) {
+          promise.reject("EMPTY_URI", "文件地址为空");
+          return;
+        }
+        byte[] bytes = readUri(Uri.parse(uriStr), Math.max(1, (long) maxBytes));
+        if (bytes == null || bytes.length == 0) {
+          promise.reject("READ_FAILED", "读取文件失败");
+          return;
+        }
+        String text = new String(bytes, StandardCharsets.UTF_8);
+        if (text.startsWith("\uFEFF")) text = text.substring(1);
+        promise.resolve(text);
+      } catch (Exception e) {
+        Log.e("Utils", "readTextFile error", e);
+        promise.reject("READ_FILE", e.getMessage() != null ? e.getMessage() : "读取文件失败");
+      }
+    }).start();
+  }
+
   /**
    * 读取本地图片并返回 data: dataUrl（仅在发送/重发请求时临时生成，不落盘）。
    */
@@ -414,6 +599,10 @@ public class UtilsModule extends ReactContextBaseJavaModule {
   }
 
   private byte[] readUri(Uri uri) throws Exception {
+    return readUri(uri, Long.MAX_VALUE);
+  }
+
+  private byte[] readUri(Uri uri, long maxBytes) throws Exception {
     String scheme = uri.getScheme();
     if ("data".equalsIgnoreCase(scheme)) {
       String whole = uri.toString();
@@ -421,21 +610,86 @@ public class UtilsModule extends ReactContextBaseJavaModule {
       if (comma < 0) throw new Exception("无法读取图片数据");
       String meta = whole.substring(5, comma);
       String body = whole.substring(comma + 1);
+      byte[] data;
       if (meta.contains(";base64")) {
-        return android.util.Base64.decode(body, android.util.Base64.DEFAULT);
+        data = android.util.Base64.decode(body, android.util.Base64.DEFAULT);
+      } else {
+        data = java.net.URLDecoder.decode(body, "UTF-8").getBytes("UTF-8");
       }
-      return java.net.URLDecoder.decode(body, "UTF-8").getBytes("UTF-8");
+      if (data.length > maxBytes) throw new Exception("文件超过大小限制");
+      return data;
     }
     InputStream input = reactContext.getContentResolver().openInputStream(uri);
-    if (input == null) throw new Exception("无法读取图片地址");
+    if (input == null) throw new Exception("无法读取文件地址");
     ByteArrayOutputStream buf = new ByteArrayOutputStream();
     byte[] chunk = new byte[8192];
     int read;
+    long total = 0;
     while ((read = input.read(chunk)) != -1) {
+      total += read;
+      if (total > maxBytes) {
+        input.close();
+        throw new Exception("文件超过大小限制");
+      }
       buf.write(chunk, 0, read);
     }
     input.close();
     return buf.toByteArray();
+  }
+
+  private WritableMap buildSkippedFile(String name, long size, String reason) {
+    WritableMap item = Arguments.createMap();
+    item.putString("name", name != null && !name.isEmpty() ? name : "文件");
+    item.putDouble("size", Math.max(0, size));
+    item.putString("reason", reason);
+    return item;
+  }
+
+  private String queryDisplayName(Uri uri) {
+    try (Cursor cursor = reactContext.getContentResolver().query(uri, null, null, null, null)) {
+      if (cursor != null && cursor.moveToFirst()) {
+        int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+        if (index >= 0) {
+          String name = cursor.getString(index);
+          if (name != null && !name.trim().isEmpty()) return name.trim();
+        }
+      }
+    } catch (Exception ignored) {
+      // ignore
+    }
+    String path = uri.getLastPathSegment();
+    if (path == null || path.trim().isEmpty()) return "file.txt";
+    int slash = path.lastIndexOf('/');
+    return slash >= 0 ? path.substring(slash + 1) : path;
+  }
+
+  private long queryFileSize(Uri uri) {
+    try (Cursor cursor = reactContext.getContentResolver().query(uri, null, null, null, null)) {
+      if (cursor != null && cursor.moveToFirst()) {
+        int index = cursor.getColumnIndex(OpenableColumns.SIZE);
+        if (index >= 0 && !cursor.isNull(index)) return cursor.getLong(index);
+      }
+    } catch (Exception ignored) {
+      // ignore
+    }
+    return -1;
+  }
+
+  private String sanitizeFileName(String raw) {
+    String name = raw == null || raw.trim().isEmpty() ? "file.txt" : raw.trim();
+    name = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]+", "_");
+    if (name.length() > 80) name = name.substring(name.length() - 80);
+    return name.isEmpty() ? "file.txt" : name;
+  }
+
+  private String guessMimeFromName(String name) {
+    String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+    if (lower.endsWith(".json")) return "application/json";
+    if (lower.endsWith(".csv")) return "text/csv";
+    if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "text/markdown";
+    if (lower.endsWith(".xml")) return "application/xml";
+    if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "application/yaml";
+    return "text/plain";
   }
 
   private String detectImageMime(byte[] bytes) {

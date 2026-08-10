@@ -2,6 +2,29 @@ import { NativeModules, Platform } from 'react-native'
 
 const { UtilsModule } = NativeModules
 
+export type PickedTextFile = {
+  uri: string
+  name?: string
+  mimeType: string
+  size?: number
+}
+
+export type PickTextFilesResult = {
+  didCancel?: boolean
+  files: PickedTextFile[]
+  skipped: Array<{ name?: string; size?: number; reason: 'tooLarge' | 'unreadable' }>
+}
+
+const TEXT_FILE_MIME_TYPES = [
+  'text/*',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/typescript',
+  'application/yaml',
+  'application/x-yaml',
+]
+
 /** 将本地图片文件复制到系统剪贴板（原生写入，粘贴到其他应用可用） */
 export const copyImageToClipboard = async (uri: string): Promise<void> => {
   if (Platform.OS !== 'android') {
@@ -37,7 +60,28 @@ export const readImageDataUrl = async (uri: string): Promise<string> => {
   return result
 }
 
-/** 尽力删除一组 file:// 本地缓存图片（消息/附件删除后回收，失败忽略） */
+export const pickTextFiles = async (maxBytes: number): Promise<PickTextFilesResult> => {
+  if (Platform.OS !== 'android' || !UtilsModule?.pickFiles) {
+    throw new Error('当前版本暂不支持选择文件')
+  }
+  const result = await UtilsModule.pickFiles(TEXT_FILE_MIME_TYPES, maxBytes)
+  return {
+    didCancel: !!result?.didCancel,
+    files: Array.isArray(result?.files) ? result.files : [],
+    skipped: Array.isArray(result?.skipped) ? result.skipped : [],
+  }
+}
+
+export const readTextFile = async (uri: string, maxBytes: number): Promise<string> => {
+  if (Platform.OS !== 'android' || !uri || !UtilsModule?.readTextFile) {
+    throw new Error('当前版本不支持读取文件')
+  }
+  const result = await UtilsModule.readTextFile(uri, maxBytes)
+  if (typeof result !== 'string' || !result.trim()) throw new Error('文件内容为空')
+  return result
+}
+
+/** 尽力删除一组 file:// 本地缓存附件（消息/附件删除后回收，失败忽略） */
 export const deleteLocalFiles = async (uris: (string | undefined)[]): Promise<void> => {
   const targets = (uris || []).filter((u): u is string => !!u && u.startsWith('file://'))
   if (!targets.length) return

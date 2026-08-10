@@ -45,7 +45,12 @@ import ActionButton from '@/components/common/ActionButton'
 import AppModal from '@/components/common/AppModal'
 import FormField from '@/components/common/FormField'
 import { createId } from '@/utils/id'
-import { copyImageToClipboard, cacheImageTo, deleteLocalFiles } from '@/utils/nativeModules/utils'
+import {
+  copyImageToClipboard,
+  cacheImageTo,
+  deleteLocalFiles,
+  pickTextFiles,
+} from '@/utils/nativeModules/utils'
 import { markMediaPickerOpened, markMediaPickerSettled } from '@/utils/appResumeRepair'
 import {
   inferVisionCapability,
@@ -88,6 +93,8 @@ type ConversationSection = {
 
 const MAX_IMAGE_ATTACHMENTS = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+const MAX_FILE_ATTACHMENTS = 3
+const MAX_TEXT_FILE_BYTES = 512 * 1024
 const DAY_MS = 24 * 60 * 60 * 1000
 const DRAWER_SWIPE_EDGE_WIDTH = 10
 const DRAWER_SWIPE_DISTANCE = 56
@@ -231,7 +238,7 @@ const Home = ({ componentId }: Props) => {
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   /** 全屏预览的图片 */
   const [previewImage, setPreviewImage] = useState<LX.ChatAttachment | null>(null)
-  /** 编辑重发：待发送的图片附件（保留原图，可逐个移除） */
+  /** 编辑重发：待发送的原消息附件（可逐个移除） */
   const [editAttachments, setEditAttachments] = useState<LX.ChatAttachment[]>([])
   const listRef = useRef<FlatList>(null)
 
@@ -312,8 +319,17 @@ const Home = ({ componentId }: Props) => {
   const currentModelId = active?.model || defaultModel || ''
   /** 当前模型图片能力（用于标记与发送前提示） */
   const currentVision = inferVisionCapability(currentModelId)
-  const hasPendingImage = pendingAttachments.length > 0
-  const remainingImageSlots = Math.max(0, MAX_IMAGE_ATTACHMENTS - pendingAttachments.length)
+  const pendingImageAttachments = useMemo(
+    () => pendingAttachments.filter((item) => item.type === 'image'),
+    [pendingAttachments]
+  )
+  const pendingFileAttachments = useMemo(
+    () => pendingAttachments.filter((item) => item.type === 'file'),
+    [pendingAttachments]
+  )
+  const hasPendingImage = pendingImageAttachments.length > 0
+  const remainingImageSlots = Math.max(0, MAX_IMAGE_ATTACHMENTS - pendingImageAttachments.length)
+  const remainingFileSlots = Math.max(0, MAX_FILE_ATTACHMENTS - pendingFileAttachments.length)
   const remainingImageSlotsLabel =
     remainingImageSlots > 0 ? `还可添加 ${remainingImageSlots} 张` : '已达上限'
   const isPendingImageTextOnly = hasPendingImage && currentVision === 'text'
@@ -501,7 +517,11 @@ const Home = ({ componentId }: Props) => {
         )
         return
       }
-      setPendingAttachments((prev) => [...prev, ...picked].slice(0, MAX_IMAGE_ATTACHMENTS))
+      setPendingAttachments((prev) => {
+        const currentImageCount = prev.filter((attachment) => attachment.type === 'image').length
+        const slots = Math.max(0, MAX_IMAGE_ATTACHMENTS - currentImageCount)
+        return [...prev, ...picked.slice(0, slots)]
+      })
       if (skipped.length) {
         const tooLarge = skipped.filter((item) => item.reason === 'tooLarge').length
         const unreadable = skipped.length - tooLarge
@@ -513,7 +533,7 @@ const Home = ({ componentId }: Props) => {
         toast(`已添加 ${picked.length} 张，跳过 ${skipped.length + overLimit} 张：${reasons.join('，')}`)
       } else if (overLimit) {
         toast(`已添加 ${picked.length} 张，跳过 ${overLimit} 张超过剩余名额`)
-      } else if (pendingAttachments.length) {
+      } else if (pendingImageAttachments.length) {
         const nextRemaining = Math.max(0, remainingImageSlots - picked.length)
         toast(nextRemaining ? `已添加 ${picked.length} 张，还可添加 ${nextRemaining} 张` : '已添加图片，已达上限')
       }
@@ -522,7 +542,62 @@ const Home = ({ componentId }: Props) => {
     } finally {
       markMediaPickerSettled()
     }
-  }, [pendingAttachments.length, remainingImageSlots, streaming])
+  }, [pendingImageAttachments.length, remainingImageSlots, streaming])
+
+  const handlePickFiles = useCallback(async () => {
+    if (streaming) return
+    if (remainingFileSlots <= 0) {
+      toast(`最多上传 ${MAX_FILE_ATTACHMENTS} 个文件`)
+      return
+    }
+    setAttachMenuOpen(false)
+    markMediaPickerOpened()
+    try {
+      const result = await pickTextFiles(MAX_TEXT_FILE_BYTES)
+      if (result.didCancel) return
+      const picked = result.files.slice(0, remainingFileSlots).map<LX.ChatAttachment>((file) => ({
+        id: createId('att_'),
+        type: 'file',
+        uri: file.uri,
+        mimeType: file.mimeType || 'text/plain',
+        name: file.name || '文件.txt',
+        size: file.size,
+      }))
+      const overLimit = Math.max(0, result.files.length - picked.length)
+      const skipped = result.skipped || []
+      if (!picked.length) {
+        const hasTooLarge = skipped.some((item) => item.reason === 'tooLarge')
+        toast(
+          hasTooLarge
+            ? `文件需小于 ${formatFileSize(MAX_TEXT_FILE_BYTES)}`
+            : '文件读取失败，请换一个文本文件试试'
+        )
+        return
+      }
+      setPendingAttachments((prev) => {
+        const currentFileCount = prev.filter((attachment) => attachment.type === 'file').length
+        const slots = Math.max(0, MAX_FILE_ATTACHMENTS - currentFileCount)
+        return [...prev, ...picked.slice(0, slots)]
+      })
+      if (skipped.length || overLimit) {
+        const tooLarge = skipped.filter((item) => item.reason === 'tooLarge').length
+        const unreadable = skipped.length - tooLarge
+        const reasons = [
+          tooLarge ? `${tooLarge} 个超过 ${formatFileSize(MAX_TEXT_FILE_BYTES)}` : '',
+          unreadable ? `${unreadable} 个不可读取` : '',
+          overLimit ? `${overLimit} 个超过剩余名额` : '',
+        ].filter(Boolean)
+        toast(`已添加 ${picked.length} 个，跳过 ${skipped.length + overLimit} 个：${reasons.join('，')}`)
+      } else if (pendingFileAttachments.length) {
+        const nextRemaining = Math.max(0, remainingFileSlots - picked.length)
+        toast(nextRemaining ? `已添加 ${picked.length} 个文件，还可添加 ${nextRemaining} 个` : '已添加文件，已达上限')
+      }
+    } catch (err: any) {
+      toast(err?.message || '选择文件失败')
+    } finally {
+      markMediaPickerSettled()
+    }
+  }, [pendingFileAttachments.length, remainingFileSlots, streaming])
 
   const removePendingAttachment = useCallback((id: string) => {
     const removed = pendingAttachments.find((item) => item.id === id)
@@ -557,7 +632,7 @@ const Home = ({ componentId }: Props) => {
     }
 
     // 有图时，在发送前给出能力提示，避免选了仅文本模型后才报错
-    if (attachments.length) {
+    if (attachments.some((attachment) => attachment.type === 'image')) {
       const cap = inferVisionCapability(active?.model || defaultModel || '')
       if (cap === 'text') {
         Alert.alert(
@@ -595,7 +670,7 @@ const Home = ({ componentId }: Props) => {
       setModelQuery('')
       setModelPickerOpen(false)
       toast(`已切换：${modelId}`)
-      if (pendingAttachments.length) {
+      if (pendingImageAttachments.length) {
         const cap = inferVisionCapability(modelId)
         if (cap === 'text') {
           toast('该模型通常为仅文本，当前待发送图片可能不受支持')
@@ -604,7 +679,7 @@ const Home = ({ componentId }: Props) => {
         }
       }
     },
-    [activeId, activeStation, pendingAttachments.length]
+    [activeId, activeStation, pendingImageAttachments.length]
   )
 
   const handleRefreshModels = useCallback(async () => {
@@ -687,7 +762,7 @@ const Home = ({ componentId }: Props) => {
 
     const startEdit = () => {
       setEditTarget({ id: item.id, content: item.content, attachments: item.attachments })
-      setEditAttachments(item.attachments?.filter((a) => a.type === 'image') || [])
+      setEditAttachments(item.attachments || [])
       setEditDraft(item.content)
     }
 
@@ -719,7 +794,8 @@ const Home = ({ componentId }: Props) => {
       return
     }
     if (!ensureReady()) return
-    if (editAttachments.length) {
+    const editImageAttachments = editAttachments.filter((attachment) => attachment.type === 'image')
+    if (editImageAttachments.length) {
       const cap = inferVisionCapability(active?.model || defaultModel || '')
       if (cap === 'text') {
         Alert.alert(
@@ -754,7 +830,7 @@ const Home = ({ componentId }: Props) => {
     }
   }, [editTarget, editDraft, editAttachments, ensureReady, active?.model, defaultModel, scrollToEnd, markFailedAttachmentUris])
 
-  /** 编辑弹窗内移除某张原图附件 */
+  /** 编辑弹窗内移除某个原消息附件 */
   const removeEditAttachment = useCallback((id: string) => {
     setEditAttachments((prev) => prev.filter((a) => a.id !== id))
   }, [])
@@ -963,10 +1039,42 @@ const Home = ({ componentId }: Props) => {
           : 'transparent'
       const textColor = isUser || isError ? colors.textInverse : colors.text
       const imageAttachments = item.attachments?.filter((attachment) => attachment.type === 'image') || []
+      const fileAttachments = item.attachments?.filter((attachment) => attachment.type === 'file') || []
       const renderBrokenImage = (label = '图片已失效') => (
         <View style={styles.imageBrokenBox}>
           <Icon name="warning" size={18} color="rgba(255,255,255,0.86)" />
           <Text style={styles.imageBrokenText}>{label}</Text>
+        </View>
+      )
+      const renderMessageFile = (attachment: LX.ChatAttachment) => (
+        <View
+          key={attachment.id}
+          style={[
+            styles.messageFileCard,
+            {
+              backgroundColor: isUser ? 'rgba(255,255,255,0.12)' : colors.surface,
+              borderColor: isUser ? 'rgba(255,255,255,0.28)' : colors.border,
+            },
+          ]}
+          accessibilityLabel={`文件 ${attachment.name || '未命名文件'}`}
+        >
+          <Icon name="file" size={17} color={textColor} />
+          <View style={styles.messageFileInfo}>
+            <Text style={[styles.messageFileName, { color: textColor }]} numberOfLines={1}>
+              {attachment.name || '未命名文件'}
+            </Text>
+            <Text
+              style={[
+                styles.messageFileMeta,
+                { color: isUser ? 'rgba(255,255,255,0.74)' : colors.textSecondary },
+              ]}
+              numberOfLines={1}
+            >
+              {[attachment.mimeType || 'text/plain', formatFileSize(attachment.size)]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
+          </View>
         </View>
       )
       const renderActionPill = (
@@ -1068,7 +1176,7 @@ const Home = ({ componentId }: Props) => {
                 },
               ]}
             >
-              {!item.content && !imageAttachments.length ? (
+              {!item.content && !imageAttachments.length && !fileAttachments.length ? (
                 isStreamingThis ? (
                   <ThinkingIndicator color={textColor} size={Math.max(16, fontSize)} />
                 ) : null
@@ -1108,6 +1216,16 @@ const Home = ({ componentId }: Props) => {
                       ))}
                     </View>
                   ) : null}
+                  {fileAttachments.length ? (
+                    <View
+                      style={[
+                        styles.messageFileList,
+                        imageAttachments.length ? styles.messageFileListAfterImage : null,
+                      ]}
+                    >
+                      {fileAttachments.map(renderMessageFile)}
+                    </View>
+                  ) : null}
                   {item.content ? (
                     <Text
                       style={[
@@ -1116,7 +1234,9 @@ const Home = ({ componentId }: Props) => {
                           fontSize: fontSize,
                           lineHeight: fontSize * 1.5,
                         },
-                        imageAttachments.length ? styles.messageTextAfterImage : null,
+                        imageAttachments.length || fileAttachments.length
+                          ? styles.messageTextAfterImage
+                          : null,
                       ]}
                       selectable
                     >
@@ -1360,7 +1480,7 @@ const Home = ({ componentId }: Props) => {
             <Text style={[styles.emptyBrand, { color: colors.primary }]}>IKUN Chat</Text>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>今天想聊点什么？</Text>
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              聚焦输入，支持 Markdown、图片消息、编辑重发与重新生成。
+              聚焦输入，支持 Markdown、图片/文件附件、编辑重发与重新生成。
             </Text>
             <TouchableOpacity
               style={[
@@ -1394,79 +1514,124 @@ const Home = ({ componentId }: Props) => {
           >
             <View style={styles.pendingHeader}>
               <Text style={[styles.pendingTitle, { color: colors.textSecondary }]}>
-                待发送图片 {pendingAttachments.length}/{MAX_IMAGE_ATTACHMENTS} ·{' '}
-                {remainingImageSlotsLabel}
+                待发送附件 · 图片 {pendingImageAttachments.length}/{MAX_IMAGE_ATTACHMENTS} · 文件{' '}
+                {pendingFileAttachments.length}/{MAX_FILE_ATTACHMENTS}
               </Text>
               <IconButton
                 name="close"
-                accessibilityLabel="清空待发送图片"
+                accessibilityLabel="清空待发送附件"
                 color={colors.textSecondary}
                 size={16}
                 onPress={clearPendingAttachments}
               />
             </View>
-            <View style={styles.pendingGrid}>
-              {pendingAttachments.map((attachment) => (
-                <Pressable
-                  key={attachment.id}
-                  style={styles.pendingItem}
-                  onPress={() => openImagePreview(attachment)}
-                  accessibilityRole="imagebutton"
-                  accessibilityLabel={attachment.name || '待发送图片'}
-                  accessibilityHint="点击查看大图"
-                >
-                  {isImageBroken(attachment) ? (
-                    <View style={styles.pendingBrokenBox}>
-                      <Icon name="warning" size={16} color="#fff" />
-                      <Text style={styles.pendingBrokenText}>已失效</Text>
-                    </View>
-                  ) : (
-                    <Image
-                      source={{ uri: attachment.uri }}
-                      style={styles.pendingImage}
-                      resizeMode="cover"
-                      onError={() => markImageBroken(attachment.uri)}
+            {pendingImageAttachments.length ? (
+              <View style={styles.pendingGrid}>
+                {pendingImageAttachments.map((attachment) => (
+                  <Pressable
+                    key={attachment.id}
+                    style={styles.pendingItem}
+                    onPress={() => openImagePreview(attachment)}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel={attachment.name || '待发送图片'}
+                    accessibilityHint="点击查看大图"
+                  >
+                    {isImageBroken(attachment) ? (
+                      <View style={styles.pendingBrokenBox}>
+                        <Icon name="warning" size={16} color="#fff" />
+                        <Text style={styles.pendingBrokenText}>已失效</Text>
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: attachment.uri }}
+                        style={styles.pendingImage}
+                        resizeMode="cover"
+                        onError={() => markImageBroken(attachment.uri)}
+                      />
+                    )}
+                    <IconButton
+                      name="close"
+                      accessibilityLabel={`移除${attachment.name || '图片'}`}
+                      color="#fff"
+                      size={14}
+                      hitSlop={6}
+                      style={styles.pendingRemove}
+                      onPress={() => removePendingAttachment(attachment.id)}
                     />
-                  )}
-                  <IconButton
-                    name="close"
-                    accessibilityLabel={`移除${attachment.name || '图片'}`}
-                    color="#fff"
-                    size={14}
-                    hitSlop={6}
-                    style={styles.pendingRemove}
-                    onPress={() => removePendingAttachment(attachment.id)}
-                  />
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.pendingCapabilityRow}>
-              <Text
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            {pendingFileAttachments.length ? (
+              <View
                 style={[
-                  styles.pendingHint,
-                  { color: isPendingImageTextOnly ? colors.error : colors.textSecondary },
+                  styles.pendingFileList,
+                  pendingImageAttachments.length ? styles.pendingFileListAfterImage : null,
                 ]}
               >
-                {currentVision === 'vision'
-                  ? `已选图片 · ${visionCapabilityLabel(currentVision)}模型（${currentModel}）支持图片输入`
-                  : currentVision === 'text'
-                    ? `已选图片 · 当前模型「${currentModel}」为仅文本，建议切换视觉模型`
-                    : `已选图片 · 模型「${currentModel}」图片能力未知，发送时可能提示不支持`}
-              </Text>
-              {isPendingImageTextOnly ? (
-                <TouchableOpacity
-                  style={[styles.pendingCapabilityAction, { borderColor: colors.error }]}
-                  onPress={() => openModelPicker('vision')}
-                  accessibilityLabel="切换视觉模型"
-                  accessibilityRole="button"
+                {pendingFileAttachments.map((attachment) => (
+                  <View
+                    key={attachment.id}
+                    style={[
+                      styles.pendingFileCard,
+                      { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                    ]}
+                  >
+                    <Icon name="file" size={17} color={colors.primary} />
+                    <View style={styles.pendingFileInfo}>
+                      <Text style={[styles.pendingFileName, { color: colors.text }]} numberOfLines={1}>
+                        {attachment.name || '未命名文件'}
+                      </Text>
+                      <Text
+                        style={[styles.pendingFileMeta, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {[attachment.mimeType || 'text/plain', formatFileSize(attachment.size)]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    </View>
+                    <IconButton
+                      name="close"
+                      accessibilityLabel={`移除${attachment.name || '文件'}`}
+                      color={colors.textSecondary}
+                      size={15}
+                      hitSlop={6}
+                      onPress={() => removePendingAttachment(attachment.id)}
+                    />
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {hasPendingImage ? (
+              <View style={styles.pendingCapabilityRow}>
+                <Text
+                  style={[
+                    styles.pendingHint,
+                    { color: isPendingImageTextOnly ? colors.error : colors.textSecondary },
+                  ]}
                 >
-                  <Icon name="model" size={13} color={colors.error} />
-                  <Text style={[styles.pendingCapabilityActionText, { color: colors.error }]}>
-                    切换模型
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
+                  {currentVision === 'vision'
+                    ? `已选图片 · ${visionCapabilityLabel(currentVision)}模型（${currentModel}）支持图片输入`
+                    : currentVision === 'text'
+                      ? `已选图片 · 当前模型「${currentModel}」为仅文本，建议切换视觉模型`
+                      : `已选图片 · 模型「${currentModel}」图片能力未知，发送时可能提示不支持`}
+                </Text>
+                {isPendingImageTextOnly ? (
+                  <TouchableOpacity
+                    style={[styles.pendingCapabilityAction, { borderColor: colors.error }]}
+                    onPress={() => openModelPicker('vision')}
+                    accessibilityLabel="切换视觉模型"
+                    accessibilityRole="button"
+                  >
+                    <Icon name="model" size={13} color={colors.error} />
+                    <Text style={[styles.pendingCapabilityActionText, { color: colors.error }]}>
+                      切换模型
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         ) : null}
         <View
@@ -2031,6 +2196,26 @@ const Home = ({ componentId }: Props) => {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.menuRow}
+          onPress={() => void handlePickFiles()}
+          disabled={streaming || remainingFileSlots <= 0}
+          accessibilityLabel="上传文件"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: streaming || remainingFileSlots <= 0 }}
+        >
+          <Icon name="file" size={20} color={colors.textSecondary} />
+          <View style={styles.menuRowText}>
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+              上传文件
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {remainingFileSlots > 0
+                ? `还可添加 ${remainingFileSlots} 个 · 单个 ≤ ${formatFileSize(MAX_TEXT_FILE_BYTES)} · 支持文本类文件`
+                : `已达 ${MAX_FILE_ATTACHMENTS} 个上限，可先移除一个`}
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.menuRow}
           onPress={() => {
             setAttachMenuOpen(false)
             void openPromptModal()
@@ -2151,43 +2336,85 @@ const Home = ({ componentId }: Props) => {
         {editAttachments.length ? (
           <View style={styles.editAttachmentsBlock}>
             <Text style={[styles.editAttachmentsTitle, { color: colors.textSecondary }]}>
-              原消息图片（将随重发上传，可移除）
+              原消息附件（将随重发上传，可移除）
             </Text>
-            <View style={styles.pendingGrid}>
-              {editAttachments.map((attachment) => (
-                <Pressable
-                  key={attachment.id}
-                  style={styles.pendingItem}
-                  onPress={() => openImagePreview(attachment)}
-                  accessibilityRole="imagebutton"
-                  accessibilityLabel={attachment.name || '原图图片'}
-                  accessibilityHint="点击查看大图"
-                >
-                  {isImageBroken(attachment) ? (
-                    <View style={styles.pendingBrokenBox}>
-                      <Icon name="warning" size={16} color="#fff" />
-                      <Text style={styles.pendingBrokenText}>已失效</Text>
+            {editAttachments.some((attachment) => attachment.type === 'image') ? (
+              <View style={styles.pendingGrid}>
+                {editAttachments
+                  .filter((attachment) => attachment.type === 'image')
+                  .map((attachment) => (
+                    <Pressable
+                      key={attachment.id}
+                      style={styles.pendingItem}
+                      onPress={() => openImagePreview(attachment)}
+                      accessibilityRole="imagebutton"
+                      accessibilityLabel={attachment.name || '原消息图片'}
+                      accessibilityHint="点击查看大图"
+                    >
+                      {isImageBroken(attachment) ? (
+                        <View style={styles.pendingBrokenBox}>
+                          <Icon name="warning" size={16} color="#fff" />
+                          <Text style={styles.pendingBrokenText}>已失效</Text>
+                        </View>
+                      ) : (
+                        <Image
+                          source={{ uri: attachment.uri }}
+                          style={styles.pendingImage}
+                          resizeMode="cover"
+                          onError={() => markImageBroken(attachment.uri)}
+                        />
+                      )}
+                      <IconButton
+                        name="close"
+                        accessibilityLabel={`移除原图${attachment.name || ''}`}
+                        color="#fff"
+                        size={14}
+                        hitSlop={6}
+                        style={styles.pendingRemove}
+                        onPress={() => removeEditAttachment(attachment.id)}
+                      />
+                    </Pressable>
+                  ))}
+              </View>
+            ) : null}
+            {editAttachments.some((attachment) => attachment.type === 'file') ? (
+              <View style={styles.editFileList}>
+                {editAttachments
+                  .filter((attachment) => attachment.type === 'file')
+                  .map((attachment) => (
+                    <View
+                      key={attachment.id}
+                      style={[
+                        styles.pendingFileCard,
+                        { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                      ]}
+                    >
+                      <Icon name="file" size={17} color={colors.primary} />
+                      <View style={styles.pendingFileInfo}>
+                        <Text style={[styles.pendingFileName, { color: colors.text }]} numberOfLines={1}>
+                          {attachment.name || '未命名文件'}
+                        </Text>
+                        <Text
+                          style={[styles.pendingFileMeta, { color: colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {[attachment.mimeType || 'text/plain', formatFileSize(attachment.size)]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                      </View>
+                      <IconButton
+                        name="close"
+                        accessibilityLabel={`移除文件${attachment.name || ''}`}
+                        color={colors.textSecondary}
+                        size={15}
+                        hitSlop={6}
+                        onPress={() => removeEditAttachment(attachment.id)}
+                      />
                     </View>
-                  ) : (
-                    <Image
-                      source={{ uri: attachment.uri }}
-                      style={styles.pendingImage}
-                      resizeMode="cover"
-                      onError={() => markImageBroken(attachment.uri)}
-                    />
-                  )}
-                  <IconButton
-                    name="close"
-                    accessibilityLabel={`移除原图${attachment.name || ''}`}
-                    color="#fff"
-                    size={14}
-                    hitSlop={6}
-                    style={styles.pendingRemove}
-                    onPress={() => removeEditAttachment(attachment.id)}
-                  />
-                </Pressable>
-              ))}
-            </View>
+                  ))}
+              </View>
+            ) : null}
           </View>
         ) : null}
         <View style={styles.modalActions}>
@@ -2394,6 +2621,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     opacity: 0.82,
   },
+  messageFileList: {
+    gap: 6,
+  },
+  messageFileListAfterImage: {
+    marginTop: 8,
+  },
+  messageFileCard: {
+    width: 210,
+    maxWidth: '100%',
+    minHeight: 48,
+    borderRadius: 13,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  messageFileInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  messageFileName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  messageFileMeta: {
+    fontSize: 11,
+    marginTop: 2,
+  },
   messageTextAfterImage: { marginTop: 8 },
   empty: {
     flex: 1,
@@ -2442,7 +2699,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  pendingTitle: { fontSize: 12, fontWeight: '700' },
+  pendingTitle: { flex: 1, fontSize: 12, fontWeight: '700' },
   pendingGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2493,6 +2750,34 @@ const styles = StyleSheet.create({
     right: 2,
     borderRadius: 12,
     backgroundColor: 'rgba(15,23,42,0.72)',
+  },
+  pendingFileList: {
+    gap: 7,
+  },
+  pendingFileListAfterImage: {
+    marginTop: 8,
+  },
+  pendingFileCard: {
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pendingFileInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pendingFileName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pendingFileMeta: {
+    fontSize: 11,
+    marginTop: 2,
   },
   composer: {
     flexDirection: 'row',
@@ -2730,6 +3015,10 @@ const styles = StyleSheet.create({
   editAttachmentsTitle: {
     fontSize: 12,
     marginBottom: 6,
+  },
+  editFileList: {
+    gap: 7,
+    marginTop: 8,
   },
   previewRoot: {
     flex: 1,

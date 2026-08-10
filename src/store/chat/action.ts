@@ -1,6 +1,6 @@
 import { chatCompletionsStream } from '@/core/api'
 import type { ApiMessage, ApiMessageContentPart } from '@/core/api'
-import { readImageDataUrl } from '@/utils/nativeModules/utils'
+import { readImageDataUrl, readTextFile } from '@/utils/nativeModules/utils'
 import conversationAction from '@/store/conversation/action'
 import conversationState from '@/store/conversation/state'
 import settingState from '@/store/setting/state'
@@ -19,6 +19,8 @@ class AttachmentReadError extends Error {
 
 const isAttachmentReadError = (err: unknown): err is AttachmentReadError =>
   Array.isArray((err as AttachmentReadError | undefined)?.attachmentUris)
+
+const MAX_TEXT_FILE_BYTES = 512 * 1024
 
 /** 取一张图片附件的 dataUrl：优先旧数据里已存的 base64，否则从本地缓存文件实时读取 */
 const resolveAttachmentDataUrl = async (
@@ -40,14 +42,42 @@ const resolveAttachmentDataUrl = async (
   )
 }
 
+const resolveFileText = async (attachment: LX.ChatAttachment): Promise<string> => {
+  const label = attachment.name ? `「${attachment.name}」` : '文件'
+  if (!attachment.uri || !/^(?:file|content):/.test(attachment.uri)) {
+    throw new AttachmentReadError(
+      `${label}地址不可读取，请重新选择文件后再发送`,
+      attachment.uri ? [attachment.uri] : []
+    )
+  }
+  try {
+    const text = await readTextFile(attachment.uri, MAX_TEXT_FILE_BYTES)
+    return [
+      `文件：${attachment.name || '未命名文件'}`,
+      attachment.mimeType ? `类型：${attachment.mimeType}` : '',
+      attachment.size ? `大小：${Math.round(attachment.size / 1024)}KB` : '',
+      '',
+      text,
+    ].filter(Boolean).join('\n')
+  } catch {
+    throw new AttachmentReadError(`${label}读取失败，请重新选择文件后再发送`, [attachment.uri])
+  }
+}
+
 const buildUserContent = async (message: LX.ChatMessage): Promise<ApiMessage['content']> => {
   const imageParts: ApiMessageContentPart[] = []
+  const fileBlocks: string[] = []
   for (const attachment of message.attachments || []) {
-    if (attachment.type !== 'image') continue
-    const url = await resolveAttachmentDataUrl(attachment)
-    imageParts.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
+    if (attachment.type === 'image') {
+      const url = await resolveAttachmentDataUrl(attachment)
+      imageParts.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
+    } else if (attachment.type === 'file') {
+      fileBlocks.push(await resolveFileText(attachment))
+    }
   }
-  const text = message.content.trim()
+  const text = [message.content.trim(), ...fileBlocks.map((block) => `<file>\n${block}\n</file>`)]
+    .filter(Boolean)
+    .join('\n\n')
   if (!imageParts.length) return text
   const parts: ApiMessageContentPart[] = []
   if (text) parts.push({ type: 'text', text })
@@ -357,7 +387,7 @@ export default {
     const convItem = conversationState.conversations.find((c) => c.id === conv.id)
     if (convItem && idx === 0) {
       await conversationAction.updateConversation(conv.id, {
-        title: (text || '图片消息').slice(0, 30),
+        title: (text || '附件消息').slice(0, 30),
       })
     }
 

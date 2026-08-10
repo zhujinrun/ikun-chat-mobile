@@ -80,13 +80,13 @@ const sanitizeAttachments = (raw: unknown): LX.ChatAttachment[] | undefined => {
   const list: LX.ChatAttachment[] = []
   for (const item of raw) {
     if (!isRecord(item)) continue
-    const type = item.type === 'image' ? 'image' : null
+    const type = item.type === 'image' ? 'image' : item.type === 'file' ? 'file' : null
     const uri = typeof item.uri === 'string' ? item.uri.trim() : ''
     const dataUrl = typeof item.dataUrl === 'string' ? item.dataUrl.trim() : undefined
     const mimeType =
       typeof item.mimeType === 'string' && item.mimeType.trim()
         ? item.mimeType.trim()
-        : 'image/jpeg'
+        : type === 'file' ? 'text/plain' : 'image/jpeg'
     if (!type || (!uri && !dataUrl)) continue
     list.push({
       id: typeof item.id === 'string' && item.id ? item.id : createId('att_'),
@@ -264,7 +264,7 @@ export default {
     const removed = state.messages[id] || []
     state.conversations = state.conversations.filter((c) => c.id !== id)
     delete state.messages[id]
-    // 回收该会话已落盘的缓存图片文件
+    // 回收该会话已落盘的缓存附件文件
     if (removed.flatMap((m) => m.attachments || []).length) {
       void deleteLocalFiles(removed.flatMap((m) => (m.attachments || []).map((a) => a.uri)))
     }
@@ -313,7 +313,7 @@ export default {
         (conv.title === '新对话' || conv.title === 'New Chat') &&
         (message.content.trim() || message.attachments?.length)
       ) {
-        conv.title = (message.content.trim() || '图片消息').slice(0, 30)
+        conv.title = (message.content.trim() || '附件消息').slice(0, 30)
       }
       sortConversations()
       await persistConversations()
@@ -423,7 +423,7 @@ export default {
     global.state_event.messagesUpdated(conversationId)
   },
 
-  /** 删除某条消息里的单个图片附件；图片删完后只剩空则删除整条消息 */
+  /** 删除某条消息里的单个附件；附件删完后只剩空则删除整条消息 */
   async removeAttachment(
     conversationId: string,
     messageId: string,

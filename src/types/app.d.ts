@@ -41,7 +41,7 @@ declare global {
 
     type ChatMessageStatus = 'streaming' | 'stopped' | 'failed'
 
-    type ChatAttachmentType = 'image'
+    type ChatAttachmentType = 'image' | 'file'
 
     type ChatAttachment = {
       id: string

@@ -28,6 +28,7 @@ export type AppIconName =
   | 'eye'
   | 'eye-off'
   | 'image'
+  | 'file'
   | 'more'
 
 const ICON_MAP: Record<AppIconName, string> = {
@@ -56,6 +57,7 @@ const ICON_MAP: Record<AppIconName, string> = {
   eye: 'eye-outline',
   'eye-off': 'eye-off-outline',
   image: 'image-outline',
+  file: 'document-text-outline',
   more: 'ellipsis-horizontal',
 }
 
