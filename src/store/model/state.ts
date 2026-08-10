@@ -1,13 +1,13 @@
 interface InitState {
-  models: LX.ModelInfo[]
-  loading: boolean
-  error: string | null
+  modelsByStation: Record<string, LX.ModelInfo[]>
+  loadingByStation: Record<string, boolean>
+  errorByStation: Record<string, string | null>
 }
 
 const state: InitState = {
-  models: [],
-  loading: false,
-  error: null,
+  modelsByStation: {},
+  loadingByStation: {},
+  errorByStation: {},
 }
 
 export default state

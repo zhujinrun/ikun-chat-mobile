@@ -139,9 +139,10 @@ const parseXhrErrorMessage = (raw: string, statusText: string, status: number): 
 export const chatCompletions = async (
   model: string,
   messages: ApiMessage[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  stationId?: string | null
 ): Promise<string> => {
-  const { baseUrl, apiKey, extraHeaders } = getApiConfig()
+  const { baseUrl, apiKey, extraHeaders } = getApiConfig(stationId)
   if (!baseUrl) throw new ApiError('请先配置 API URL')
   if (!apiKey) throw new ApiError('请先配置 API Key')
 
@@ -312,9 +313,10 @@ export const chatCompletionsStream = async (
   model: string,
   messages: ApiMessage[],
   handlers: StreamHandlers,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  stationId?: string | null
 ): Promise<void> => {
-  const { baseUrl, apiKey, extraHeaders } = getApiConfig()
+  const { baseUrl, apiKey, extraHeaders } = getApiConfig(stationId)
   if (!baseUrl) throw new ApiError('请先配置 API URL')
   if (!apiKey) throw new ApiError('请先配置 API Key')
 
@@ -338,7 +340,7 @@ export const chatCompletionsStream = async (
   }
 
   if (!useStream) {
-    const text = await chatCompletions(model, messages, signal)
+    const text = await chatCompletions(model, messages, signal, stationId)
     emitDelta(text)
     emitDone()
     return
@@ -394,7 +396,7 @@ export const chatCompletionsStream = async (
     } catch (err) {
       console.warn('[chat.stream] sse text fallback failed', err)
     }
-    const fallback = await chatCompletions(model, messages, signal)
+    const fallback = await chatCompletions(model, messages, signal, stationId)
     emitDelta(fallback)
     emitDone()
     return
@@ -433,7 +435,7 @@ export const chatCompletionsStream = async (
         if (signal?.aborted) return
         console.warn('[chat.stream] reader.read failed, fallback', err?.message || err)
         if (!receivedAny) {
-          const fallback = await chatCompletions(model, messages, signal)
+          const fallback = await chatCompletions(model, messages, signal, stationId)
           emitDelta(fallback)
         }
         emitDone()

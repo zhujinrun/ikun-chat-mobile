@@ -1,36 +1,52 @@
 import { listModels } from '@/core/api'
 import { storageDataPrefix } from '@/config/constant'
 import { getData, saveData } from '@/plugins/storage'
-import settingAction from '@/store/setting/action'
-import settingState from '@/store/setting/state'
+import stationAction from '@/store/station/action'
+import stationState from '@/store/station/state'
 import state from './state'
+
+const cacheKey = (stationId: string) => `${storageDataPrefix.modelsCache}_${stationId}`
 
 export default {
   async loadCache() {
-    const cached = await getData<LX.ModelInfo[]>(storageDataPrefix.modelsCache)
-    if (cached?.length) {
-      state.models = cached
+    let changed = false
+    for (const station of stationState.stations) {
+      const cached =
+        (await getData<LX.ModelInfo[]>(cacheKey(station.id))) ||
+        (station.id === stationState.defaultId
+          ? await getData<LX.ModelInfo[]>(storageDataPrefix.modelsCache)
+          : null)
+      if (cached?.length) {
+        state.modelsByStation[station.id] = cached
+        changed = true
+      }
+    }
+    if (changed) {
       global.state_event.modelsUpdated()
     }
   },
 
-  async refresh() {
-    state.loading = true
-    state.error = null
+  async refresh(stationId?: string | null) {
+    const station = stationAction.getById(stationId) || stationAction.getDefault()
+    if (!station) throw new Error('请先配置中转站')
+
+    state.loadingByStation[station.id] = true
+    state.errorByStation[station.id] = null
     global.state_event.modelsUpdated()
     try {
-      const models = await listModels()
-      state.models = models
-      await saveData(storageDataPrefix.modelsCache, models)
-      if (!settingState.setting['api.defaultModel'] && models[0]) {
-        settingAction.updateSetting({ 'api.defaultModel': models[0].id })
+      const models = await listModels(station.id)
+      state.modelsByStation[station.id] = models
+      await saveData(cacheKey(station.id), models)
+      if (!station.defaultModel && models[0]) {
+        await stationAction.updateStation(station.id, { defaultModel: models[0].id })
       }
-      state.error = null
+      state.errorByStation[station.id] = null
+      return models
     } catch (err: any) {
-      state.error = err?.message || '加载模型失败'
+      state.errorByStation[station.id] = err?.message || '加载模型失败'
       throw err
     } finally {
-      state.loading = false
+      state.loadingByStation[station.id] = false
       global.state_event.modelsUpdated()
     }
   },

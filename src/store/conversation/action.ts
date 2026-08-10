@@ -2,7 +2,7 @@ import { storageDataPrefix } from '@/config/constant'
 import { getData, removeData, saveData } from '@/plugins/storage'
 import { createId } from '@/utils/id'
 import { deleteLocalFiles } from '@/utils/nativeModules/utils'
-import settingState from '@/store/setting/state'
+import stationAction from '@/store/station/action'
 import state from './state'
 
 const persistConversations = async () => {
@@ -114,6 +114,10 @@ const sanitizeConversations = (raw: unknown): LX.Conversation[] => {
     list.push({
       id,
       title: typeof item.title === 'string' && item.title ? item.title : '新对话',
+      stationId:
+        typeof item.stationId === 'string' && item.stationId
+          ? item.stationId
+          : stationAction.getDefault()?.id || '',
       model: typeof item.model === 'string' ? item.model : '',
       systemPrompt: typeof item.systemPrompt === 'string' ? item.systemPrompt : undefined,
       pinned: typeof item.pinned === 'boolean' ? item.pinned : false,
@@ -166,6 +170,11 @@ export default {
       const data = await getData<{ list: LX.Conversation[]; activeId: string | null }>(
         storageDataPrefix.conversations
       )
+      const shouldPersistSanitized =
+        Array.isArray(data?.list) &&
+        data.list.some(
+          (item) => isRecord(item) && !(typeof item.stationId === 'string' && item.stationId)
+        )
       const list = sanitizeConversations(data?.list)
       state.conversations = list
       const activeFromStore = typeof data?.activeId === 'string' ? data.activeId : null
@@ -174,6 +183,9 @@ export default {
         list[0]?.id ||
         null
       sortConversations()
+      if (shouldPersistSanitized) {
+        await persistConversations()
+      }
 
       if (state.activeId) {
         await this.loadMessages(state.activeId)
@@ -212,10 +224,12 @@ export default {
 
   async createConversation(title = '新对话', model?: string) {
     const now = Date.now()
+    const station = stationAction.getDefault()
     const conversation: LX.Conversation = {
       id: createId('c_'),
       title,
-      model: model || settingState.setting['api.defaultModel'] || '',
+      stationId: station?.id || '',
+      model: model || station?.defaultModel || '',
       createdAt: now,
       updatedAt: now,
     }

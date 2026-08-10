@@ -30,7 +30,8 @@ import conversationAction from '@/store/conversation/action'
 import chatAction from '@/store/chat/action'
 import { useStopping, useStreaming, useStreamingMessageId } from '@/store/chat/hook'
 import { useModels } from '@/store/model/hook'
-import settingAction from '@/store/setting/action'
+import stationAction from '@/store/station/action'
+import { useStations } from '@/store/station/hook'
 import { useSettingValue } from '@/store/setting/hook'
 import { navigations } from '@/navigation'
 import { toast } from '@/utils/toast'
@@ -197,10 +198,7 @@ const Home = ({ componentId }: Props) => {
   const streaming = useStreaming()
   const stopping = useStopping()
   const streamingMessageId = useStreamingMessageId()
-  const { models } = useModels()
-  const defaultModel = useSettingValue('api.defaultModel')
-  const apiUrl = useSettingValue('api.baseUrl')
-  const apiKey = useSettingValue('api.apiKey')
+  const { stations, defaultId } = useStations()
   const fontSize = useSettingValue('common.fontSize')
   const globalSystemPrompt = useSettingValue('chat.systemPrompt')
 
@@ -236,15 +234,32 @@ const Home = ({ componentId }: Props) => {
     [conversations, activeId]
   )
 
+  const activeStation = useMemo(
+    () =>
+      stations.find((item) => item.id === active?.stationId) ||
+      stations.find((item) => item.id === defaultId) ||
+      stations[0] ||
+      null,
+    [active?.stationId, defaultId, stations]
+  )
+
+  const { models } = useModels(activeStation?.id)
+  const defaultModel = activeStation?.defaultModel || ''
+
   const filteredConversations = useMemo(() => {
     const query = conversationQuery.trim().toLowerCase()
     if (!query) return conversations
     return conversations.filter((item) =>
-      [item.title, item.model, item.systemPrompt]
+      [
+        item.title,
+        item.model,
+        item.systemPrompt,
+        stations.find((station) => station.id === item.stationId)?.name,
+      ]
         .filter(Boolean)
         .some((text) => String(text).toLowerCase().includes(query))
       )
-  }, [conversationQuery, conversations])
+  }, [conversationQuery, conversations, stations])
 
   const conversationSections = useMemo<ConversationSection[]>(() => {
     const sectionMap = new Map<string, ConversationSection>()
@@ -295,7 +310,7 @@ const Home = ({ componentId }: Props) => {
   const remainingImageSlotsLabel =
     remainingImageSlots > 0 ? `还可添加 ${remainingImageSlots} 张` : '已达上限'
   const isPendingImageTextOnly = hasPendingImage && currentVision === 'text'
-  const needSetup = !apiUrl || !apiKey
+  const needSetup = !activeStation?.baseUrl || !activeStation.apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
   const colors = theme.colors
   const drawerBg = theme.isDark ? colors.surface : colors.background
@@ -348,7 +363,7 @@ const Home = ({ componentId }: Props) => {
 
   const ensureReady = useCallback(() => {
     if (needSetup) {
-      toast('请先在设置中配置 API URL 和 API Key')
+      toast('请先在设置中配置当前中转站')
       void navigations.pushSettingScreen(componentId)
       return false
     }
@@ -565,9 +580,10 @@ const Home = ({ componentId }: Props) => {
 
   const handleSelectModel = useCallback(
     async (modelId: string) => {
-      settingAction.updateSetting({ 'api.defaultModel': modelId })
       if (activeId) {
         await conversationAction.updateConversation(activeId, { model: modelId })
+      } else if (activeStation) {
+        await stationAction.updateStation(activeStation.id, { defaultModel: modelId })
       }
       setModelQuery('')
       setModelPickerOpen(false)
@@ -581,7 +597,7 @@ const Home = ({ componentId }: Props) => {
         }
       }
     },
-    [activeId, pendingAttachments.length]
+    [activeId, activeStation, pendingAttachments.length]
   )
 
   const handleCopy = useCallback((content: string) => {

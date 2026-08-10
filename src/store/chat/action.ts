@@ -4,6 +4,7 @@ import { readImageDataUrl } from '@/utils/nativeModules/utils'
 import conversationAction from '@/store/conversation/action'
 import conversationState from '@/store/conversation/state'
 import settingState from '@/store/setting/state'
+import stationAction from '@/store/station/action'
 import state from './state'
 
 class AttachmentReadError extends Error {
@@ -74,7 +75,8 @@ const buildApiMessages = async (conversationId: string): Promise<ApiMessage[]> =
 }
 
 const resolveModel = (conv: LX.Conversation) => {
-  const model = conv.model || settingState.setting['api.defaultModel']
+  const station = stationAction.getForConversation(conv)
+  const model = conv.model || station?.defaultModel || settingState.setting['api.defaultModel']
   if (!model) {
     throw new Error('请先选择模型（设置中配置 API 并刷新模型列表）')
   }
@@ -134,7 +136,8 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
           }
         },
       },
-      controller.signal
+      controller.signal,
+      conv.stationId
     )
     if (controller.signal.aborted) {
       finalStatus = 'stopped'

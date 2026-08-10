@@ -15,9 +15,21 @@ declare global {
       'common.fontSize': number
     }
 
+    type ApiStation = {
+      id: string
+      name: string
+      baseUrl: string
+      apiKey: string
+      extraHeaders: string
+      defaultModel: string
+      createdAt: number
+      updatedAt: number
+    }
+
     type Conversation = {
       id: string
       title: string
+      stationId: string
       model: string
       systemPrompt?: string
       pinned?: boolean

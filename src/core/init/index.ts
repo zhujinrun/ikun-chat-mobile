@@ -1,6 +1,7 @@
 import { initSetting } from '@/config/setting'
 import settingAction from '@/store/setting/action'
 import themeAction from '@/store/theme/action'
+import stationAction from '@/store/station/action'
 import conversationAction from '@/store/conversation/action'
 import modelAction from '@/store/model/action'
 import { StatusBar, Platform } from 'react-native'
@@ -32,6 +33,12 @@ export default async () => {
     }
   }
 
+  try {
+    await stationAction.load()
+  } catch (err) {
+    console.error('[init] station load failed', err)
+  }
+
   // 会话加载失败不得阻断进入首页
   try {
     await conversationAction.load()
@@ -46,8 +53,9 @@ export default async () => {
   }
 
   // 若已配置 API，后台尝试刷新模型（失败忽略）
-  if (setting['api.baseUrl'] && setting['api.apiKey']) {
-    void modelAction.refresh().catch((err) => {
+  const defaultStation = stationAction.getDefault()
+  if (defaultStation?.baseUrl && defaultStation.apiKey) {
+    void modelAction.refresh(defaultStation.id).catch((err) => {
       console.warn('[init] model refresh failed', err?.message || err)
     })
   }

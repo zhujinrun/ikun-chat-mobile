@@ -3,6 +3,7 @@ export const APP_PROVIDER = 'com.ikunshare.chat.mobile.provider'
 
 export const storageDataPrefix = {
   setting: 'app_setting',
+  apiStations: 'api_stations',
   conversations: 'chat_conversations',
   messages: 'chat_messages_',
   modelsCache: 'chat_models_cache',

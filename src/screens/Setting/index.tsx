@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
+  Alert,
 } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import { useSetting } from '@/store/setting/hook'
@@ -13,6 +14,8 @@ import settingAction from '@/store/setting/action'
 import themeAction from '@/store/theme/action'
 import modelAction from '@/store/model/action'
 import { useModels } from '@/store/model/hook'
+import stationAction from '@/store/station/action'
+import { useStations } from '@/store/station/hook'
 import { inferVisionCapability, visionCapabilityLabel } from '@/utils/modelCapability'
 import { themeList } from '@/theme/themes'
 import { toast } from '@/utils/toast'
@@ -55,12 +58,24 @@ const validateExtraHeaders = (raw: string) => {
 const Setting = (_props: Props) => {
   const theme = useTheme()
   const setting = useSetting()
-  const { models, loading, error } = useModels()
+  const { stations, defaultId } = useStations()
   const colors = theme.colors
 
-  const [baseUrl, setBaseUrl] = useState(setting['api.baseUrl'])
-  const [apiKey, setApiKey] = useState(setting['api.apiKey'])
-  const [extraHeaders, setExtraHeaders] = useState(setting['api.extraHeaders'])
+  const [selectedStationId, setSelectedStationId] = useState<string | null>(defaultId)
+  const selectedStation = useMemo(
+    () =>
+      stations.find((item) => item.id === selectedStationId) ||
+      stations.find((item) => item.id === defaultId) ||
+      stations[0] ||
+      null,
+    [defaultId, selectedStationId, stations]
+  )
+  const { models, loading, error } = useModels(selectedStation?.id)
+
+  const [stationName, setStationName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [extraHeaders, setExtraHeaders] = useState('')
   const [extraHeadersError, setExtraHeadersError] = useState<string | null>(null)
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState(setting['chat.systemPrompt'])
@@ -68,27 +83,55 @@ const Setting = (_props: Props) => {
   const [maxTokens, setMaxTokens] = useState(String(setting['chat.maxTokens'] || ''))
   const [testing, setTesting] = useState(false)
 
+  useEffect(() => {
+    if (selectedStation && selectedStation.id !== selectedStationId) {
+      setSelectedStationId(selectedStation.id)
+    }
+  }, [selectedStation, selectedStationId])
+
+  useEffect(() => {
+    if (!selectedStation) return
+    setStationName(selectedStation.name)
+    setBaseUrl(selectedStation.baseUrl)
+    setApiKey(selectedStation.apiKey)
+    setExtraHeaders(selectedStation.extraHeaders)
+    setExtraHeadersError(null)
+  }, [
+    selectedStation?.apiKey,
+    selectedStation?.baseUrl,
+    selectedStation?.extraHeaders,
+    selectedStation?.id,
+    selectedStation?.name,
+  ])
+
   const connectionStatus = useMemo(() => {
+    if (!selectedStation) {
+      return { title: '未配置', desc: '请先新增中转站', tone: colors.textSecondary }
+    }
     if (testing || loading) {
       return { title: '正在测试连接', desc: '正在拉取模型列表…', tone: colors.primary }
     }
     if (error) {
       return { title: '连接失败', desc: error, tone: colors.error }
     }
-    if (setting['api.baseUrl'] && setting['api.apiKey'] && models.length > 0) {
+    if (selectedStation.baseUrl && selectedStation.apiKey && models.length > 0) {
       return {
         title: '连接正常',
-        desc: `已缓存 ${models.length} 个模型${setting['api.defaultModel'] ? ` · 默认 ${setting['api.defaultModel']}` : ''}`,
+        desc: `已缓存 ${models.length} 个模型${selectedStation.defaultModel ? ` · 默认 ${selectedStation.defaultModel}` : ''}`,
         tone: colors.success,
       }
     }
-    if (setting['api.baseUrl'] && setting['api.apiKey']) {
+    if (selectedStation.baseUrl && selectedStation.apiKey) {
       return { title: '待测试', desc: '保存后测试连接即可刷新模型', tone: colors.primaryDark }
     }
-    return { title: '未配置', desc: '请填写 API URL 与 API Key', tone: colors.textSecondary }
-  }, [colors, error, loading, models.length, setting, testing])
+    return { title: '未配置', desc: '请填写当前中转站的 API URL 与 API Key', tone: colors.textSecondary }
+  }, [colors, error, loading, models.length, selectedStation, testing])
 
-  const saveApi = useCallback(() => {
+  const saveStation = useCallback(async () => {
+    if (!selectedStation) {
+      toast('请先新增中转站')
+      return false
+    }
     const headerError = validateExtraHeaders(extraHeaders)
     setExtraHeadersError(headerError)
     if (headerError) {
@@ -96,17 +139,18 @@ const Setting = (_props: Props) => {
       return false
     }
     const normalized = normalizeBaseUrl(baseUrl)
-    settingAction.updateSetting({
-      'api.baseUrl': normalized || baseUrl.trim(),
-      'api.apiKey': apiKey.trim(),
-      'api.extraHeaders': extraHeaders.trim(),
+    await stationAction.updateStation(selectedStation.id, {
+      name: stationName.trim() || selectedStation.name,
+      baseUrl: normalized || baseUrl.trim(),
+      apiKey: apiKey.trim(),
+      extraHeaders: extraHeaders.trim(),
     })
     if (normalized && normalized !== baseUrl.trim()) {
       setBaseUrl(normalized)
     }
-    toast('API 配置已保存')
+    toast('中转站已保存')
     return true
-  }, [baseUrl, apiKey, extraHeaders])
+  }, [apiKey, baseUrl, extraHeaders, selectedStation, stationName])
 
   const saveChat = useCallback(() => {
     const temp = parseFloat(temperature)
@@ -120,28 +164,63 @@ const Setting = (_props: Props) => {
   }, [systemPrompt, temperature, maxTokens])
 
   const testAndRefresh = useCallback(async () => {
+    if (!selectedStation) {
+      toast('请先新增中转站')
+      return
+    }
     if (!baseUrl.trim() || !apiKey.trim()) {
       toast('请先填写 API URL 和 API Key')
       return
     }
-    if (!saveApi()) return
+    if (!(await saveStation())) return
     setTesting(true)
     try {
-      await modelAction.refresh()
-      // refresh 后从 store 读最新数量
-      const { default: modelState } = await import('@/store/model/state')
-      toast(`连接成功，共 ${modelState.models.length} 个模型`)
+      const refreshed = await modelAction.refresh(selectedStation.id)
+      toast(`连接成功，共 ${refreshed?.length || 0} 个模型`)
     } catch (err: any) {
       toast(err?.message || '连接失败')
     } finally {
       setTesting(false)
     }
-  }, [apiKey, baseUrl, saveApi])
+  }, [apiKey, baseUrl, saveStation, selectedStation])
 
-  const selectDefaultModel = useCallback((modelId: string) => {
-    settingAction.updateSetting({ 'api.defaultModel': modelId })
+  const selectDefaultModel = useCallback(async (modelId: string) => {
+    if (!selectedStation) return
+    await stationAction.updateStation(selectedStation.id, { defaultModel: modelId })
     toast(`默认模型：${modelId}`)
+  }, [selectedStation])
+
+  const addStation = useCallback(async () => {
+    const station = await stationAction.addStation()
+    setSelectedStationId(station.id)
+    toast('已新增中转站')
   }, [])
+
+  const setDefaultStation = useCallback(async () => {
+    if (!selectedStation) return
+    await stationAction.setDefault(selectedStation.id)
+    toast(`默认中转站：${selectedStation.name}`)
+  }, [selectedStation])
+
+  const deleteStation = useCallback(() => {
+    if (!selectedStation) return
+    Alert.alert('删除中转站', `确定删除「${selectedStation.name}」？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => {
+          void stationAction
+            .removeStation(selectedStation.id)
+            .then(() => {
+              setSelectedStationId(stationAction.getDefault()?.id || null)
+              toast('已删除中转站')
+            })
+            .catch((err: any) => toast(err?.message || '删除失败'))
+        },
+      },
+    ])
+  }, [selectedStation])
 
   return (
     <ScrollView
@@ -151,17 +230,72 @@ const Setting = (_props: Props) => {
     >
       <Text style={[styles.section, { color: colors.text }]}>中转站</Text>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.stationHeaderRow}>
+          <Text style={[styles.label, { color: colors.textSecondary, marginBottom: 0 }]}>配置</Text>
+          <ActionButton
+            title="新增"
+            variant="secondary"
+            compact
+            onPress={() => void addStation()}
+            accessibilityLabel="新增中转站"
+          />
+        </View>
+        <View style={styles.stationList}>
+          {stations.map((station) => {
+            const selected = station.id === selectedStation?.id
+            const isDefault = station.id === defaultId
+            return (
+              <TouchableOpacity
+                key={station.id}
+                style={[
+                  styles.stationChip,
+                  {
+                    backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
+                    borderColor: selected ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setSelectedStationId(station.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`${selected ? '当前' : '切换到'}中转站 ${station.name}${isDefault ? '，默认' : ''}`}
+                accessibilityState={{ selected }}
+              >
+                <Text
+                  style={[styles.stationChipName, { color: selected ? '#fff' : colors.text }]}
+                  numberOfLines={1}
+                >
+                  {station.name}
+                </Text>
+                {isDefault ? (
+                  <Text
+                    style={[
+                      styles.stationChipMeta,
+                      { color: selected ? 'rgba(255,255,255,0.82)' : colors.textSecondary },
+                    ]}
+                  >
+                    默认
+                  </Text>
+                ) : null}
+              </TouchableOpacity>
+            )
+          })}
+        </View>
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, { backgroundColor: connectionStatus.tone }]} />
           <View style={styles.statusTextWrap}>
             <Text style={[styles.statusTitle, { color: colors.text }]}>
-              {connectionStatus.title}
+              {selectedStation?.name || '中转站'} · {connectionStatus.title}
             </Text>
             <Text style={[styles.hint, { color: colors.textSecondary, marginBottom: 0 }]}>
               {connectionStatus.desc}
             </Text>
           </View>
         </View>
+        <FormField
+          label="中转站名称"
+          value={stationName}
+          onChange={setStationName}
+          placeholder="例如 OpenAI、DeepSeek、公司代理"
+        />
         <FormField
           label="API URL"
           value={baseUrl}
@@ -199,12 +333,12 @@ const Setting = (_props: Props) => {
           multiline
           error={extraHeadersError}
         />
-        <View style={styles.actionRow}>
+        <View style={styles.actionRowWrap}>
           <ActionButton
             title="保存"
-            onPress={saveApi}
+            onPress={() => void saveStation()}
             style={styles.saveButton}
-            accessibilityLabel="保存 API 配置"
+            accessibilityLabel="保存中转站配置"
           />
           <ActionButton
             title="测试"
@@ -214,17 +348,33 @@ const Setting = (_props: Props) => {
             style={[styles.saveButton, { backgroundColor: colors.primaryDark }]}
             accessibilityLabel="测试连接并刷新模型"
           />
+          <ActionButton
+            title="设默认"
+            variant="secondary"
+            onPress={() => void setDefaultStation()}
+            disabled={!selectedStation || selectedStation.id === defaultId}
+            style={styles.saveButton}
+            accessibilityLabel="设为默认中转站"
+          />
+          <ActionButton
+            title="删除"
+            variant="danger"
+            onPress={deleteStation}
+            disabled={stations.length <= 1}
+            style={styles.saveButton}
+            accessibilityLabel="删除中转站"
+          />
         </View>
         <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
           已缓存模型：{models.length} 个
-          {setting['api.defaultModel'] ? ` · 默认 ${setting['api.defaultModel']}` : ''}
+          {selectedStation?.defaultModel ? ` · 默认 ${selectedStation.defaultModel}` : ''}
         </Text>
         {models.length > 0 ? (
           <View style={styles.modelBlock}>
             <Text style={[styles.label, { color: colors.textSecondary }]}>默认模型</Text>
             <View style={styles.themeRow}>
               {models.slice(0, 8).map((item) => {
-                const selected = item.id === setting['api.defaultModel']
+                const selected = item.id === selectedStation?.defaultModel
                 const cap =
                   item.supportedVision == null
                     ? inferVisionCapability(item.id)
@@ -246,7 +396,7 @@ const Setting = (_props: Props) => {
                         backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
                       },
                     ]}
-                    onPress={() => selectDefaultModel(item.id)}
+                    onPress={() => void selectDefaultModel(item.id)}
                     accessibilityRole="button"
                     accessibilityLabel={
                       selected
@@ -448,6 +598,44 @@ const styles = StyleSheet.create({
   statusTextWrap: { flex: 1 },
   statusTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  actionRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  stationHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  stationList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  stationChip: {
+    maxWidth: '100%',
+    minHeight: 36,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  stationChipName: {
+    fontSize: 13,
+    fontWeight: '700',
+    maxWidth: 180,
+  },
+  stationChipMeta: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
   saveButton: {
     width: 104,
     alignSelf: 'flex-start',

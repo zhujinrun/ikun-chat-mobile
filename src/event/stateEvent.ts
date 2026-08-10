@@ -5,6 +5,10 @@ export class StateEvent extends Event {
     this.emit('configUpdated', keys, setting)
   }
 
+  apiStationsUpdated() {
+    this.emit('apiStationsUpdated')
+  }
+
   themeUpdated(theme: LX.ActiveTheme) {
     this.emit('themeUpdated', theme)
   }

@@ -1,4 +1,5 @@
 import settingState from '@/store/setting/state'
+import stationAction from '@/store/station/action'
 import { DEFAULT_API_PATH } from '@/config/constant'
 
 /** 规范化中转站 base URL，统一到 .../v1 */
@@ -16,12 +17,13 @@ export const normalizeBaseUrl = (raw: string): string => {
   return url
 }
 
-export const getApiConfig = () => {
+export const getApiConfig = (stationId?: string | null) => {
+  const station = stationAction.getById(stationId) || stationAction.getDefault()
   const setting = settingState.setting
-  const baseUrl = normalizeBaseUrl(setting['api.baseUrl'])
-  const apiKey = setting['api.apiKey']?.trim() || ''
+  const baseUrl = normalizeBaseUrl(station?.baseUrl || setting['api.baseUrl'])
+  const apiKey = (station?.apiKey || setting['api.apiKey'])?.trim() || ''
   let extraHeaders: Record<string, string> = {}
-  const raw = setting['api.extraHeaders']?.trim()
+  const raw = (station?.extraHeaders || setting['api.extraHeaders'])?.trim()
   if (raw) {
     try {
       extraHeaders = JSON.parse(raw) as Record<string, string>
@@ -29,7 +31,7 @@ export const getApiConfig = () => {
       // ignore invalid json
     }
   }
-  return { baseUrl, apiKey, extraHeaders }
+  return { baseUrl, apiKey, extraHeaders, station }
 }
 
 export const buildHeaders = (apiKey: string, extraHeaders: Record<string, string> = {}) => {

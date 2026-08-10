@@ -2,8 +2,11 @@ import { buildHeaders, getApiConfig, ApiError, parseErrorMessage } from './clien
 import type { ListModelsResponse } from './types'
 import { inferVisionCapability } from '@/utils/modelCapability'
 
-export const listModels = async (signal?: AbortSignal): Promise<LX.ModelInfo[]> => {
-  const { baseUrl, apiKey, extraHeaders } = getApiConfig()
+export const listModels = async (
+  stationId?: string | null,
+  signal?: AbortSignal
+): Promise<LX.ModelInfo[]> => {
+  const { baseUrl, apiKey, extraHeaders } = getApiConfig(stationId)
   if (!baseUrl) throw new ApiError('请先配置 API URL')
   if (!apiKey) throw new ApiError('请先配置 API Key')
 
