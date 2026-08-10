@@ -1478,7 +1478,7 @@ const Home = ({ componentId }: Props) => {
               accessibilityRole="button"
               accessibilityState={{ disabled: !canSend }}
             >
-              <Icon name="send" size={18} color="#fff" />
+              <Icon name="send" size={18} color="#fff" style={styles.sendIcon} />
             </TouchableOpacity>
           )}
         </View>
@@ -2407,6 +2407,9 @@ const styles = StyleSheet.create({
     height: 38,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sendIcon: {
+    marginLeft: 3,
   },
   modalMask: { flex: 1, flexDirection: 'row' },
   drawer: {

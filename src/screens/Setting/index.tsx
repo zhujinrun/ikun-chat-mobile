@@ -21,6 +21,15 @@ import ActionButton from '@/components/common/ActionButton'
 import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
 
+const appVersion = require('../../../package.json').version as string
+
+const FONT_SIZE_OPTIONS = [
+  { value: 14, label: '小号' },
+  { value: 16, label: '标准' },
+  { value: 18, label: '大号' },
+  { value: 20, label: '超大' },
+]
+
 type Props = {
   componentId: string
 }
@@ -194,15 +203,15 @@ const Setting = (_props: Props) => {
           <ActionButton
             title="保存"
             onPress={saveApi}
-            style={styles.flexButton}
+            style={styles.saveButton}
             accessibilityLabel="保存 API 配置"
           />
           <ActionButton
-            title="测试并刷新模型"
+            title="测试"
             onPress={() => void testAndRefresh()}
             disabled={testing || loading}
             loading={testing || loading}
-            style={[styles.flexButton, { backgroundColor: colors.primaryDark }]}
+            style={[styles.saveButton, { backgroundColor: colors.primaryDark }]}
             accessibilityLabel="测试连接并刷新模型"
           />
         </View>
@@ -279,7 +288,7 @@ const Setting = (_props: Props) => {
         ) : null}
       </View>
 
-      <Text style={[styles.section, { color: colors.text }]}>对话默认</Text>
+      <Text style={[styles.section, { color: colors.text }]}>对话</Text>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <FormField
           label="系统提示词"
@@ -314,16 +323,18 @@ const Setting = (_props: Props) => {
               settingAction.updateSetting({ 'chat.stream': v })
               toast(v ? '已开启流式输出' : '已关闭流式输出')
             }}
-            trackColor={{ true: colors.primary }}
+            trackColor={{ false: colors.surfaceSecondary, true: colors.primary }}
+            thumbColor={setting['chat.stream'] ? colors.textInverse : colors.surface}
+            ios_backgroundColor={colors.surfaceSecondary}
             accessibilityRole="switch"
             accessibilityLabel="流式输出"
             accessibilityState={{ checked: setting['chat.stream'] }}
           />
         </View>
         <ActionButton
-          title="保存对话设置"
+          title="保存"
           onPress={saveChat}
-          style={{ alignSelf: 'flex-start' }}
+          style={styles.saveButton}
           accessibilityLabel="保存对话设置"
         />
       </View>
@@ -362,35 +373,35 @@ const Setting = (_props: Props) => {
           ))}
         </View>
         <Text style={[styles.label, { color: colors.textSecondary, marginTop: 12 }]}>
-          字号：{setting['common.fontSize']}
+          字号
         </Text>
         <View style={styles.themeRow}>
-          {[14, 16, 18, 20].map((size) => (
+          {FONT_SIZE_OPTIONS.map((option) => (
             <TouchableOpacity
-              key={size}
+              key={option.value}
               style={[
                 styles.themeChip,
                 {
                   backgroundColor:
-                    setting['common.fontSize'] === size
+                    setting['common.fontSize'] === option.value
                       ? colors.primary
                       : colors.surfaceSecondary,
                 },
               ]}
               onPress={() => {
-                settingAction.updateSetting({ 'common.fontSize': size })
-                global.lx.fontSize = size
+                settingAction.updateSetting({ 'common.fontSize': option.value })
+                global.lx.fontSize = option.value
               }}
               accessibilityRole="button"
-              accessibilityLabel={`设置字号 ${size}`}
-              accessibilityState={{ selected: setting['common.fontSize'] === size }}
+              accessibilityLabel={`设置字号 ${option.label}`}
+              accessibilityState={{ selected: setting['common.fontSize'] === option.value }}
             >
               <Text
                 style={{
-                  color: setting['common.fontSize'] === size ? '#fff' : colors.text,
+                  color: setting['common.fontSize'] === option.value ? '#fff' : colors.text,
                 }}
               >
-                {size}
+                {option.label}
               </Text>
             </TouchableOpacity>
           ))}
@@ -400,7 +411,7 @@ const Setting = (_props: Props) => {
       <Text style={[styles.section, { color: colors.text }]}>关于</Text>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={{ color: colors.text, lineHeight: 22 }}>
-          IKUN Chat Mobile{'\n'}
+          IKUN Chat Mobile V{appVersion}{'\n'}
           通用 OpenAI 兼容中转站客户端
         </Text>
       </View>
@@ -437,7 +448,10 @@ const styles = StyleSheet.create({
   statusTextWrap: { flex: 1 },
   statusTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  flexButton: { flex: 1 },
+  saveButton: {
+    width: 104,
+    alignSelf: 'flex-start',
+  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
