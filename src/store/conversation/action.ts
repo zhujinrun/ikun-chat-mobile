@@ -457,7 +457,7 @@ export default {
   },
 
   async clearMessages(conversationId: string) {
-    const removed = state.messages[conversationId] || []
+    const removed = await this.loadMessages(conversationId)
     state.messages[conversationId] = []
     if (removed.flatMap((m) => m.attachments || []).length) {
       void deleteLocalFiles(removed.flatMap((m) => (m.attachments || []).map((a) => a.uri)))

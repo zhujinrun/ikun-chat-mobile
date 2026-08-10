@@ -620,20 +620,25 @@ const Home = ({ componentId }: Props) => {
 
   const lastMessageId = messages.length ? messages[messages.length - 1].id : null
 
-  // 清空入口暂隐藏（左侧只保留提示词）；需要时取消注释即可
-  // const handleClear = useCallback(() => {
-  //   if (!activeId) return
-  //   Alert.alert('清空会话', '确定清空当前会话的所有消息？', [
-  //     { text: '取消', style: 'cancel' },
-  //     {
-  //       text: '清空',
-  //       style: 'destructive',
-  //       onPress: () => {
-  //         void conversationAction.clearMessages(activeId)
-  //       },
-  //     },
-  //   ])
-  // }, [activeId])
+  const handleClearChat = useCallback((id: string, title: string) => {
+    if (streaming) {
+      toast('回复中，先停止输出后再清空')
+      return
+    }
+    Alert.alert('清空消息', `确定清空「${title}」里的所有消息？会话本身会保留。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空',
+        style: 'destructive',
+        onPress: () => {
+          void conversationAction
+            .clearMessages(id)
+            .then(() => toast('已清空会话消息'))
+            .catch((err: any) => toast(err?.message || '清空失败'))
+        },
+      },
+    ])
+  }, [streaming])
 
   const openEditMessage = useCallback((item: LX.ChatMessage, options?: { confirmFollowUps?: boolean }) => {
     if (item.role !== 'user' || streaming) return
@@ -1680,6 +1685,26 @@ const Home = ({ componentId }: Props) => {
               onPress={() => {
                 const item = conversationActionTarget
                 setConversationActionTarget(null)
+                handleRenameChat(item.id, item.title)
+              }}
+              accessibilityLabel="重命名会话"
+              accessibilityRole="button"
+            >
+              <Icon name="edit" size={20} color={colors.textSecondary} />
+              <View style={styles.menuRowText}>
+                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+                  重命名
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  修改会话标题
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={() => {
+                const item = conversationActionTarget
+                setConversationActionTarget(null)
                 void handleTogglePinChat(item.id, item.pinned)
               }}
               accessibilityLabel={conversationActionTarget.pinned ? '取消置顶会话' : '置顶会话'}
@@ -1700,18 +1725,18 @@ const Home = ({ componentId }: Props) => {
               onPress={() => {
                 const item = conversationActionTarget
                 setConversationActionTarget(null)
-                handleRenameChat(item.id, item.title)
+                handleClearChat(item.id, item.title)
               }}
-              accessibilityLabel="重命名会话"
+              accessibilityLabel="清空会话消息"
               accessibilityRole="button"
             >
-              <Icon name="edit" size={20} color={colors.textSecondary} />
+              <Icon name="chat" size={20} color={colors.textSecondary} />
               <View style={styles.menuRowText}>
                 <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
-                  重命名
+                  清空消息
                 </Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                  修改会话标题
+                  保留会话，只清除本地消息记录
                 </Text>
               </View>
             </TouchableOpacity>
