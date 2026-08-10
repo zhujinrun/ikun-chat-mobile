@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  SectionList,
   TextInput,
   TouchableOpacity,
   SafeAreaView,
@@ -11,6 +12,7 @@ import {
   Modal,
   Pressable,
   Alert,
+  PanResponder,
   KeyboardAvoidingView,
   Platform,
   Share,
@@ -77,8 +79,16 @@ type MessageActionItem = {
 
 type ModelCapabilityFilter = 'all' | VisionCapability
 
+type ConversationSection = {
+  title: string
+  data: LX.Conversation[]
+}
+
 const MAX_IMAGE_ATTACHMENTS = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+const DAY_MS = 24 * 60 * 60 * 1000
+const DRAWER_SWIPE_EDGE_WIDTH = 32
+const DRAWER_SWIPE_DISTANCE = 44
 const IMAGE_PICKER_MAX_EDGE = 1600
 const IMAGE_PICKER_QUALITY = 0.8 as const
 
@@ -116,18 +126,20 @@ const getMessageStatus = (
   return message.status
 }
 
-const formatConversationTime = (ts?: number) => {
-  if (!ts) return ''
+const startOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+
+const formatConversationSectionTitle = (ts?: number) => {
+  if (!ts) return '更早'
   const date = new Date(ts)
   const now = new Date()
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  if (sameDay) {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`
+  const daysAgo = Math.floor((startOfDay(now) - startOfDay(date)) / DAY_MS)
+  if (daysAgo <= 0) return '今天'
+  if (daysAgo === 1) return '昨天'
+  if (daysAgo < 7) return '最近 7 天'
+  if (daysAgo < 30) return '最近 30 天'
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月`
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`
 }
 
 const buildImageAttachment = async (asset: Asset): Promise<BuildImageAttachmentResult> => {
@@ -234,6 +246,20 @@ const Home = ({ componentId }: Props) => {
       )
   }, [conversationQuery, conversations])
 
+  const conversationSections = useMemo<ConversationSection[]>(() => {
+    const sectionMap = new Map<string, ConversationSection>()
+    for (const item of filteredConversations) {
+      const title = item.pinned ? '置顶' : formatConversationSectionTitle(item.updatedAt)
+      const existing = sectionMap.get(title)
+      if (existing) {
+        existing.data.push(item)
+      } else {
+        sectionMap.set(title, { title, data: [item] })
+      }
+    }
+    return [...sectionMap.values()]
+  }, [filteredConversations])
+
   const filteredModels = useMemo(() => {
     const query = modelQuery.trim().toLowerCase()
     return models.filter((item) => {
@@ -272,6 +298,45 @@ const Home = ({ componentId }: Props) => {
   const needSetup = !apiUrl || !apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
   const colors = theme.colors
+  const drawerBg = theme.isDark ? colors.surface : colors.background
+  const drawerControlBg = theme.isDark ? colors.inputBg : colors.surface
+  const drawerActiveBg = theme.isDark ? colors.surfaceSecondary : colors.surface
+  const drawerMaskBg = theme.isDark ? 'rgba(0,0,0,0.5)' : 'rgba(15,23,42,0.18)'
+
+  const openDrawerPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          if (drawerOpen) return false
+          return (
+            gestureState.x0 <= DRAWER_SWIPE_EDGE_WIDTH &&
+            gestureState.dx > 16 &&
+            Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.25
+          )
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx > DRAWER_SWIPE_DISTANCE || gestureState.vx > 0.35) {
+            setDrawerOpen(true)
+          }
+        },
+      }),
+    [drawerOpen]
+  )
+
+  const closeDrawerPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+          gestureState.dx < -16 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.25,
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < -DRAWER_SWIPE_DISTANCE || gestureState.vx < -0.35) {
+            setDrawerOpen(false)
+          }
+        },
+      }),
+    []
+  )
 
   const openModelPicker = useCallback((filter?: ModelCapabilityFilter) => {
     if (filter) {
@@ -315,11 +380,20 @@ const Home = ({ componentId }: Props) => {
     [brokenImageUris]
   )
 
+  const isActiveEmptyNewConversation =
+    !!active && active.title.trim() === '新对话' && messages.length === 0
+
   const handleNewChat = useCallback(async () => {
+    if (isActiveEmptyNewConversation) {
+      setConversationQuery('')
+      setDrawerOpen(false)
+      toast('已在新对话中')
+      return
+    }
     await conversationAction.createConversation()
     setConversationQuery('')
     setDrawerOpen(false)
-  }, [])
+  }, [isActiveEmptyNewConversation])
 
   const handleSelectChat = useCallback(async (id: string) => {
     await conversationAction.setActive(id)
@@ -1144,7 +1218,10 @@ const Home = ({ componentId }: Props) => {
   }
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
+    <SafeAreaView
+      style={[styles.root, { backgroundColor: colors.background }]}
+      {...openDrawerPanResponder.panHandlers}
+    >
       <StatusBar
         barStyle={theme.isDark ? 'light-content' : 'dark-content'}
         backgroundColor="transparent"
@@ -1191,12 +1268,12 @@ const Home = ({ componentId }: Props) => {
           </View>
         </TouchableOpacity>
         <IconButton
-          name="settings"
-          accessibilityLabel="设置"
+          name="add"
+          accessibilityLabel="新建对话"
           color={colors.primary}
           size={24}
           style={[styles.headerBtn, { backgroundColor: colors.surface }]}
-          onPress={() => void navigations.pushSettingScreen(componentId)}
+          onPress={() => void handleNewChat()}
         />
       </View>
 
@@ -1492,44 +1569,19 @@ const Home = ({ componentId }: Props) => {
         transparent
         onRequestClose={() => setDrawerOpen(false)}
       >
-        <Pressable style={styles.modalMask} onPress={() => setDrawerOpen(false)}>
+        <Pressable
+          style={[styles.modalMask, { backgroundColor: drawerMaskBg }]}
+          onPress={() => setDrawerOpen(false)}
+        >
           <Pressable
-            style={[styles.drawer, { backgroundColor: colors.surface }]}
+            {...closeDrawerPanResponder.panHandlers}
+            style={[styles.drawer, { backgroundColor: drawerBg }]}
             onPress={(e) => e.stopPropagation()}
           >
-            <View style={styles.modalHeader}>
-              <View style={styles.drawerTitleWrap}>
-                <Text style={[styles.modalHeaderTitle, { color: colors.text }]}>历史会话</Text>
-                <Text style={[styles.drawerSubtitle, { color: colors.textSecondary }]}>
-                  {conversationQuery
-                    ? `${filteredConversations.length}/${conversations.length} 个匹配`
-                    : `${conversations.length} 个会话`}
-                </Text>
-              </View>
-              <IconButton
-                name="close"
-                accessibilityLabel="关闭"
-                color={colors.textSecondary}
-                size={22}
-                onPress={() => setDrawerOpen(false)}
-              />
-            </View>
-            <TouchableOpacity
-              style={[
-                styles.newChatBtn,
-                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
-              ]}
-              onPress={() => void handleNewChat()}
-              accessibilityLabel="新建对话"
-              accessibilityRole="button"
-            >
-              <Icon name="add" size={18} color={colors.primary} />
-              <Text style={[styles.newChatText, { color: colors.text }]}>新建对话</Text>
-            </TouchableOpacity>
             <View
               style={[
                 styles.drawerSearch,
-                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                { backgroundColor: drawerControlBg, borderColor: colors.border },
               ]}
             >
               <Icon name="search" size={16} color={colors.textSecondary} />
@@ -1553,58 +1605,38 @@ const Home = ({ componentId }: Props) => {
                 />
               ) : null}
             </View>
-            <FlatList
-              data={filteredConversations}
+            <SectionList
+              sections={conversationSections}
               keyExtractor={(item) => item.id}
+              style={styles.drawerList}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.drawerListContent}
+              keyboardShouldPersistTaps="handled"
+              stickySectionHeadersEnabled={false}
+              renderSectionHeader={({ section }) => (
+                <Text style={[styles.convSectionTitle, { color: colors.textSecondary }]}>
+                  {section.title}
+                </Text>
+              )}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
                     styles.convItem,
                     {
                       borderColor: item.id === activeId ? colors.primary : 'transparent',
-                      backgroundColor:
-                        item.id === activeId ? colors.surfaceSecondary : 'transparent',
+                      backgroundColor: item.id === activeId ? drawerActiveBg : 'transparent',
                     },
                   ]}
                   onPress={() => void handleSelectChat(item.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`切换到会话 ${item.title}`}
+                  accessibilityHint="长按打开会话操作菜单"
                   accessibilityState={{ selected: item.id === activeId }}
                   onLongPress={() => showConversationActions(item)}
                 >
-                  <View style={styles.convTitleRow}>
-                    <Text style={[styles.convTitle, { color: colors.text }]} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    {item.pinned ? <Icon name="pin" size={13} color={colors.primary} /> : null}
-                    <Text style={[styles.convTime, { color: colors.textSecondary }]}>
-                      {formatConversationTime(item.updatedAt)}
-                    </Text>
-                    <IconButton
-                      name="more"
-                      accessibilityLabel={`打开会话 ${item.title} 操作菜单`}
-                      color={colors.textSecondary}
-                      size={16}
-                      hitSlop={8}
-                      style={styles.convActionButton}
-                      onPress={(event) => {
-                        event.stopPropagation()
-                        showConversationActions(item)
-                      }}
-                    />
-                  </View>
-                  <View style={styles.convMetaRow}>
-                    <Icon name="model" size={12} color={colors.textSecondary} />
-                    <Text
-                      style={[styles.convMetaText, { color: colors.textSecondary }]}
-                      numberOfLines={1}
-                    >
-                      {item.model || '默认模型'}
-                      {item.systemPrompt?.trim() ? ' · 自定义提示词' : ''}
-                    </Text>
-                  </View>
+                  <Text style={[styles.convTitle, { color: colors.text }]} numberOfLines={1}>
+                    {item.title}
+                  </Text>
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
@@ -1613,6 +1645,23 @@ const Home = ({ componentId }: Props) => {
                 </Text>
               }
             />
+            <View style={[styles.drawerFooter, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[
+                  styles.drawerSettingsBtn,
+                  { backgroundColor: drawerControlBg, borderColor: colors.border },
+                ]}
+                onPress={() => {
+                  setDrawerOpen(false)
+                  void navigations.pushSettingScreen(componentId)
+                }}
+                accessibilityLabel="打开设置"
+                accessibilityRole="button"
+              >
+                <Icon name="settings" size={18} color={colors.textSecondary} />
+                <Text style={[styles.drawerSettingsText, { color: colors.text }]}>设置</Text>
+              </TouchableOpacity>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -2359,40 +2408,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', flexDirection: 'row' },
+  modalMask: { flex: 1, flexDirection: 'row' },
   drawer: {
     width: '80%',
     maxWidth: 332,
     height: '100%',
-    paddingTop: 46,
+    paddingTop: 12,
     paddingHorizontal: 12,
+    paddingBottom: 12,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  drawerTitleWrap: {
-    flex: 1,
-    paddingRight: 8,
-  },
-  modalHeaderTitle: { fontSize: 17, fontWeight: '700' },
-  drawerSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  newChatBtn: {
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 10,
-  },
-  newChatText: { fontWeight: '700', fontSize: 14 },
   drawerSearch: {
     minHeight: 38,
     borderWidth: StyleSheet.hairlineWidth,
@@ -2408,8 +2432,29 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     fontSize: 14,
   },
+  drawerList: {
+    flex: 1,
+  },
   drawerListContent: {
-    paddingBottom: 28,
+    paddingBottom: 10,
+  },
+  drawerFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 10,
+  },
+  drawerSettingsBtn: {
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  drawerSettingsText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   modelFilterRow: {
     flexDirection: 'row',
@@ -2427,30 +2472,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  convSectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    paddingBottom: 5,
+  },
   convItem: {
-    paddingVertical: 9,
+    paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 2,
   },
-  convTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  convTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
-  convTime: { fontSize: 11 },
-  convActionButton: {
-    marginRight: -6,
-  },
-  convMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 3,
-  },
-  convMetaText: { flex: 1, fontSize: 12 },
+  convTitle: { fontSize: 14, fontWeight: '600' },
   drawerEmptyText: {
     paddingHorizontal: 10,
     paddingVertical: 20,
