@@ -30,6 +30,7 @@ import conversationAction from '@/store/conversation/action'
 import chatAction from '@/store/chat/action'
 import { useStopping, useStreaming, useStreamingMessageId } from '@/store/chat/hook'
 import { useModels } from '@/store/model/hook'
+import modelAction from '@/store/model/action'
 import stationAction from '@/store/station/action'
 import { useStations } from '@/store/station/hook'
 import { useSettingValue } from '@/store/setting/hook'
@@ -243,8 +244,9 @@ const Home = ({ componentId }: Props) => {
     [active?.stationId, defaultId, stations]
   )
 
-  const { models } = useModels(activeStation?.id)
+  const { models, loading: modelsLoading, error: modelsError } = useModels(activeStation?.id)
   const defaultModel = activeStation?.defaultModel || ''
+  const currentStationName = activeStation?.name || '未配置中转站'
 
   const filteredConversations = useMemo(() => {
     const query = conversationQuery.trim().toLowerCase()
@@ -599,6 +601,23 @@ const Home = ({ componentId }: Props) => {
     },
     [activeId, activeStation, pendingAttachments.length]
   )
+
+  const handleRefreshModels = useCallback(async () => {
+    if (!activeStation) {
+      toast('请先配置中转站')
+      return
+    }
+    if (!activeStation.baseUrl || !activeStation.apiKey) {
+      toast('请先在设置中配置当前中转站')
+      return
+    }
+    try {
+      const refreshed = await modelAction.refresh(activeStation.id)
+      toast(`已刷新 ${activeStation.name}，共 ${refreshed?.length || 0} 个模型`)
+    } catch (err: any) {
+      toast(err?.message || '刷新模型失败')
+    }
+  }, [activeStation])
 
   const handleCopy = useCallback((content: string) => {
     Clipboard.setString(content)
@@ -1282,7 +1301,7 @@ const Home = ({ componentId }: Props) => {
           <View style={styles.headerSubRow}>
             <Icon name="model" size={12} color={colors.textSecondary} />
             <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
-              {currentModel}
+              {currentStationName} · {currentModel}
               {hasConvPrompt ? ' · 提示词' : ''}
             </Text>
             <Icon name="chevron-down" size={12} color={colors.textSecondary} />
@@ -1344,7 +1363,7 @@ const Home = ({ componentId }: Props) => {
             >
               <Icon name="model" size={14} color={colors.primary} />
               <Text style={[styles.emptyModelText, { color: colors.text }]} numberOfLines={1}>
-                {currentModel}
+                {currentStationName} · {currentModel}
               </Text>
               <Icon name="chevron-down" size={14} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -1813,6 +1832,55 @@ const Home = ({ componentId }: Props) => {
             />
           ) : null}
         </View>
+        <View
+          style={[
+            styles.modelStationCard,
+            { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.modelStationInfo}>
+            <Text style={[styles.modelStationLabel, { color: colors.textSecondary }]}>
+              当前中转站
+            </Text>
+            <Text style={[styles.modelStationName, { color: colors.text }]} numberOfLines={1}>
+              {currentStationName}
+            </Text>
+            {modelsError ? (
+              <Text style={[styles.modelStationError, { color: colors.error }]} numberOfLines={1}>
+                {modelsError}
+              </Text>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.modelRefreshButton,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+                opacity: modelsLoading ? 0.58 : 1,
+              },
+            ]}
+            onPress={() => void handleRefreshModels()}
+            disabled={modelsLoading}
+            accessibilityRole="button"
+            accessibilityLabel={`刷新${currentStationName}模型`}
+            accessibilityState={{ disabled: modelsLoading, busy: modelsLoading }}
+          >
+            <Icon
+              name="refresh"
+              size={14}
+              color={modelsLoading ? colors.textSecondary : colors.primary}
+            />
+            <Text
+              style={[
+                styles.modelRefreshText,
+                { color: modelsLoading ? colors.textSecondary : colors.primary },
+              ]}
+            >
+              {modelsLoading ? '刷新中' : '刷新模型'}
+            </Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.modelFilterRow}>
           {MODEL_CAPABILITY_FILTERS.map((filter) => {
             const selected = modelCapabilityFilter === filter.key
@@ -1917,7 +1985,7 @@ const Home = ({ componentId }: Props) => {
             <Text style={{ color: colors.textSecondary, padding: 12 }}>
               {modelQuery || modelCapabilityFilter !== 'all'
                 ? '未找到匹配模型'
-                : '暂无模型，请先在设置中测试连接并刷新模型'}
+                : '暂无模型，请刷新当前中转站模型'}
             </Text>
           }
         />
@@ -2499,6 +2567,47 @@ const styles = StyleSheet.create({
   drawerSettingsText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  modelStationCard: {
+    minHeight: 58,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modelStationInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  modelStationLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  modelStationName: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  modelStationError: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  modelRefreshButton: {
+    minHeight: 34,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  modelRefreshText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   modelFilterRow: {
     flexDirection: 'row',
