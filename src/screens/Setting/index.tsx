@@ -336,12 +336,14 @@ const Setting = (_props: Props) => {
         <View style={styles.actionRowWrap}>
           <ActionButton
             title="保存"
+            compact
             onPress={() => void saveStation()}
             style={styles.saveButton}
             accessibilityLabel="保存中转站配置"
           />
           <ActionButton
             title="测试"
+            compact
             onPress={() => void testAndRefresh()}
             disabled={testing || loading}
             loading={testing || loading}
@@ -351,6 +353,7 @@ const Setting = (_props: Props) => {
           <ActionButton
             title="设默认"
             variant="secondary"
+            compact
             onPress={() => void setDefaultStation()}
             disabled={!selectedStation || selectedStation.id === defaultId}
             style={styles.saveButton}
@@ -359,6 +362,7 @@ const Setting = (_props: Props) => {
           <ActionButton
             title="删除"
             variant="danger"
+            compact
             onPress={deleteStation}
             disabled={stations.length <= 1}
             style={styles.saveButton}
@@ -483,6 +487,7 @@ const Setting = (_props: Props) => {
         </View>
         <ActionButton
           title="保存"
+          compact
           onPress={saveChat}
           style={styles.saveButton}
           accessibilityLabel="保存对话设置"
@@ -597,11 +602,11 @@ const styles = StyleSheet.create({
   },
   statusTextWrap: { flex: 1 },
   statusTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  actionRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
   actionRowWrap: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    flexWrap: 'nowrap',
+    gap: 6,
     marginTop: 4,
   },
   stationHeaderRow: {
@@ -637,7 +642,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   saveButton: {
-    width: 104,
+    width: 68,
     alignSelf: 'flex-start',
   },
   switchRow: {
