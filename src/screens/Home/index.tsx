@@ -64,6 +64,17 @@ type ImageActionTarget = {
   attachment: LX.ChatAttachment
 }
 
+type MessageActionItem = {
+  key: string
+  icon: AppIconName
+  label: string
+  menuLabel?: string
+  description: string
+  onPress: () => void
+  accessibilityLabel?: string
+  muted?: boolean
+}
+
 type ModelCapabilityFilter = 'all' | VisionCapability
 
 const MAX_IMAGE_ATTACHMENTS = 4
@@ -94,6 +105,15 @@ const formatFileSize = (bytes?: number) => {
 const getModelVisionCapability = (model: LX.ModelInfo): VisionCapability => {
   if (model.supportedVision == null) return inferVisionCapability(model.id)
   return model.supportedVision ? 'vision' : 'text'
+}
+
+const getMessageStatus = (
+  message: LX.ChatMessage,
+  isStreamingThis: boolean
+): LX.ChatMessageStatus | undefined => {
+  if (isStreamingThis) return 'streaming'
+  if (message.role === 'error') return 'failed'
+  return message.status
 }
 
 const formatConversationTime = (ts?: number) => {
@@ -696,17 +716,108 @@ const Home = ({ componentId }: Props) => {
     ])
   }, [messages, active, defaultModel])
 
+  const buildMessageActions = useCallback(
+    (item: LX.ChatMessage, options?: { closeMenu?: boolean }): MessageActionItem[] => {
+      const isLast = item.id === lastMessageId
+      const status = getMessageStatus(item, streaming && item.id === streamingMessageId)
+      if (status === 'streaming') return []
+
+      const closeMenu = () => {
+        if (options?.closeMenu) setMessageActionTarget(null)
+      }
+      const actions: MessageActionItem[] = []
+
+      if (item.content) {
+        actions.push({
+          key: 'copy',
+          icon: 'copy',
+          label: '复制',
+          description: '复制这条消息内容',
+          muted: true,
+          accessibilityLabel: '复制消息',
+          onPress: () => {
+            closeMenu()
+            handleCopy(item.content)
+          },
+        })
+      }
+
+      if (item.role === 'user') {
+        actions.push({
+          key: 'edit',
+          icon: 'edit',
+          label: '编辑',
+          menuLabel: '编辑并重发',
+          description: '修改这条消息，并重新请求后续回复',
+          accessibilityLabel: '编辑并重发',
+          onPress: () => {
+            closeMenu()
+            openEditMessage(item)
+          },
+        })
+      }
+
+      const canRetryOrRegenerate = !streaming && isLast && canRegenerate
+      if (canRetryOrRegenerate && status === 'failed') {
+        actions.push({
+          key: 'retry',
+          icon: 'retry',
+          label: '重试',
+          description: '使用上一条用户消息重新请求',
+          accessibilityLabel: '重试生成',
+          onPress: () => {
+            closeMenu()
+            void handleRetry()
+          },
+        })
+        actions.push({
+          key: 'edit-retry',
+          icon: 'edit',
+          label: '编辑后重试',
+          description: '先调整上一条用户消息，再重新生成',
+          accessibilityLabel: '编辑上一条用户消息后重试',
+          onPress: () => {
+            closeMenu()
+            openLastUserForRetryEdit()
+          },
+        })
+      }
+
+      if (canRetryOrRegenerate && item.role === 'assistant' && status !== 'failed') {
+        actions.push({
+          key: 'regenerate',
+          icon: 'refresh',
+          label: '重新生成',
+          description: '基于上一条用户消息再次请求回复',
+          accessibilityLabel: '重新生成助手回复',
+          onPress: () => {
+            closeMenu()
+            void handleRegenerate()
+          },
+        })
+      }
+
+      return actions
+    },
+    [
+      canRegenerate,
+      handleCopy,
+      handleRegenerate,
+      handleRetry,
+      lastMessageId,
+      openEditMessage,
+      openLastUserForRetryEdit,
+      streaming,
+      streamingMessageId,
+    ]
+  )
+
   const handleMessageLongPress = useCallback(
     (item: LX.ChatMessage) => {
       if (streaming) return
-      const isLast = item.id === lastMessageId
-      const hasMenuAction =
-        !!item.content ||
-        item.role === 'user' ||
-        (canRegenerate && isLast && (item.role === 'assistant' || item.role === 'error'))
-      if (hasMenuAction) setMessageActionTarget(item)
+      if (buildMessageActions(item).length) setMessageActionTarget(item)
     },
-    [streaming, lastMessageId, canRegenerate]
+    [streaming, buildMessageActions]
   )
 
   const renderMessage = useCallback(
@@ -715,24 +826,15 @@ const Home = ({ componentId }: Props) => {
       const isError = item.role === 'error'
       const isLast = item.id === lastMessageId
       const isStreamingThis = streaming && item.id === streamingMessageId
-      const messageStatus: LX.ChatMessageStatus | undefined = isStreamingThis
-        ? 'streaming'
-        : isError
-          ? 'failed'
-          : item.status
+      const messageStatus = getMessageStatus(item, isStreamingThis)
+      const messageActions = buildMessageActions(item)
       // 导出会话：挂在最后一条消息下方，不与输入区提示词挤在一起
       const showExport = isLast && !streaming && messages.length > 0
-      const showFailureActions =
-        !streaming && isLast && messageStatus === 'failed' && canRegenerate
       const showActions =
         messageStatus === 'streaming' ||
-        (!streaming &&
-        (item.content ||
-          isUser ||
-          messageStatus === 'stopped' ||
-          showFailureActions ||
-          (isLast && item.role === 'assistant' && messageStatus !== 'failed' && canRegenerate) ||
-          showExport))
+        messageStatus === 'stopped' ||
+        messageActions.length > 0 ||
+        showExport
 
       const bubbleBg = isError
         ? colors.error
@@ -943,31 +1045,12 @@ const Home = ({ componentId }: Props) => {
                     accessibilityLabel: stopping ? '正在停止生成' : '停止生成',
                   })
                 : null}
-              {messageStatus !== 'streaming' && item.content
-                ? renderActionPill('copy', 'copy', '复制', () => handleCopy(item.content), {
-                    muted: true,
-                  })
-                : null}
-              {messageStatus !== 'streaming' && isUser
-                ? renderActionPill('edit', 'edit', '编辑', () => openEditMessage(item), {
-                    accessibilityLabel: '编辑并重发',
-                  })
-                : null}
-              {showFailureActions
-                ? renderActionPill('retry', 'retry', '重试', () => void handleRetry())
-                : null}
-              {showFailureActions
-                ? renderActionPill('edit-retry', 'edit', '编辑后重试', openLastUserForRetryEdit, {
-                    accessibilityLabel: '编辑上一条用户消息后重试',
-                  })
-                : null}
-              {messageStatus !== 'streaming' &&
-              isLast &&
-              item.role === 'assistant' &&
-              messageStatus !== 'failed' &&
-              canRegenerate
-                ? renderActionPill('regenerate', 'refresh', '重新生成', () => void handleRegenerate())
-                : null}
+              {messageActions.map((action) =>
+                renderActionPill(action.key, action.icon, action.label, action.onPress, {
+                  muted: action.muted,
+                  accessibilityLabel: action.accessibilityLabel,
+                })
+              )}
               {messageStatus !== 'streaming' && showExport
                 ? renderActionPill('export', 'export', '导出', () => void handleExport(), {
                     muted: true,
@@ -982,14 +1065,10 @@ const Home = ({ componentId }: Props) => {
     [
       colors,
       fontSize,
-      handleCopy,
+      buildMessageActions,
       handleExport,
       handleMessageLongPress,
-      handleRegenerate,
-      handleRetry,
       handleStop,
-      openLastUserForRetryEdit,
-      openEditMessage,
       openImagePreview,
       handleImageLongPress,
       isImageBroken,
@@ -998,7 +1077,6 @@ const Home = ({ componentId }: Props) => {
       stopping,
       streamingMessageId,
       lastMessageId,
-      canRegenerate,
       messages.length,
     ]
   )
@@ -1009,21 +1087,22 @@ const Home = ({ componentId }: Props) => {
     : isPendingImageTextOnly
       ? colors.error
       : colors.primary
-  const messageActionIsLast = messageActionTarget?.id === lastMessageId
-  const messageActionStatus: LX.ChatMessageStatus | undefined = messageActionTarget
-    ? messageActionTarget.role === 'error'
-      ? 'failed'
-      : messageActionTarget.status
+  const messageActionStatus = messageActionTarget
+    ? getMessageStatus(
+        messageActionTarget,
+        streaming && messageActionTarget.id === streamingMessageId
+      )
     : undefined
   const messageActionFailed = messageActionStatus === 'failed'
-  const messageActionCanRegenerate =
-    !streaming && !!messageActionTarget && messageActionIsLast && canRegenerate
   const messageActionTitle =
     messageActionTarget?.role === 'user'
       ? '用户消息'
       : messageActionFailed
         ? '失败消息'
         : '助手消息'
+  const messageMenuActions = messageActionTarget
+    ? buildMessageActions(messageActionTarget, { closeMenu: true })
+    : []
   const imageActionCanDelete = imageActionTarget?.message.role === 'user' && !!activeId
   const imageActionTitle = imageActionTarget?.attachment.name || '图片'
   const renderMenuAction = (
@@ -1310,75 +1389,16 @@ const Home = ({ componentId }: Props) => {
       >
         {messageActionTarget ? (
           <>
-            {messageActionTarget.content
-              ? renderMenuAction(
-                  'copy',
-                  'copy',
-                  '复制',
-                  '复制这条消息内容',
-                  () => {
-                    const item = messageActionTarget
-                    setMessageActionTarget(null)
-                    handleCopy(item.content)
-                  },
-                  '复制消息'
-                )
-              : null}
-            {messageActionTarget.role === 'user'
-              ? renderMenuAction(
-                  'edit',
-                  'edit',
-                  '编辑并重发',
-                  '修改这条消息，并重新请求后续回复',
-                  () => {
-                    const item = messageActionTarget
-                    setMessageActionTarget(null)
-                    openEditMessage(item)
-                  },
-                  '编辑并重发消息'
-                )
-              : null}
-            {messageActionCanRegenerate && messageActionFailed
-              ? renderMenuAction(
-                  'retry',
-                  'retry',
-                  '重试',
-                  '使用上一条用户消息重新请求',
-                  () => {
-                    setMessageActionTarget(null)
-                    void handleRetry()
-                  },
-                  '重试生成'
-                )
-              : null}
-            {messageActionCanRegenerate && messageActionFailed
-              ? renderMenuAction(
-                  'edit-retry',
-                  'edit',
-                  '编辑后重试',
-                  '先调整上一条用户消息，再重新生成',
-                  () => {
-                    setMessageActionTarget(null)
-                    openLastUserForRetryEdit()
-                  },
-                  '编辑上一条用户消息后重试'
-                )
-              : null}
-            {messageActionCanRegenerate &&
-            messageActionTarget.role === 'assistant' &&
-            !messageActionFailed
-              ? renderMenuAction(
-                  'regenerate',
-                  'refresh',
-                  '重新生成',
-                  '基于上一条用户消息再次请求回复',
-                  () => {
-                    setMessageActionTarget(null)
-                    void handleRegenerate()
-                  },
-                  '重新生成助手回复'
-                )
-              : null}
+            {messageMenuActions.map((action) =>
+              renderMenuAction(
+                action.key,
+                action.icon,
+                action.menuLabel || action.label,
+                action.description,
+                action.onPress,
+                action.accessibilityLabel
+              )
+            )}
           </>
         ) : null}
       </AppModal>
