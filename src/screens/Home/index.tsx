@@ -89,8 +89,8 @@ type ConversationSection = {
 const MAX_IMAGE_ATTACHMENTS = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const DAY_MS = 24 * 60 * 60 * 1000
-const DRAWER_SWIPE_EDGE_WIDTH = 32
-const DRAWER_SWIPE_DISTANCE = 44
+const DRAWER_SWIPE_EDGE_WIDTH = 10
+const DRAWER_SWIPE_DISTANCE = 56
 const IMAGE_PICKER_MAX_EDGE = 1600
 const IMAGE_PICKER_QUALITY = 0.8 as const
 
@@ -100,6 +100,11 @@ const MODEL_CAPABILITY_FILTERS: Array<{ key: ModelCapabilityFilter; label: strin
   { key: 'text', label: '仅文本' },
   { key: 'unknown', label: '未知' },
 ]
+
+const MARKDOWN_TABLE_RE =
+  /(^|\n)\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*(\n|$)/
+
+const hasMarkdownTable = (text: string) => MARKDOWN_TABLE_RE.test(text || '')
 
 type BuildImageAttachmentResult =
   | { attachment: LX.ChatAttachment }
@@ -1038,6 +1043,7 @@ const Home = ({ componentId }: Props) => {
             : messageStatus === 'failed'
               ? renderStatePill('status-failed', 'warning', '生成失败', 'danger')
               : null
+      const disableMessageLongPress = isAssistant && hasMarkdownTable(item.content)
 
       return (
         <View
@@ -1047,7 +1053,10 @@ const Home = ({ componentId }: Props) => {
             isAssistant ? styles.assistantWrap : null,
           ]}
         >
-          <Pressable onLongPress={() => handleMessageLongPress(item)}>
+          <Pressable
+            disabled={disableMessageLongPress}
+            onLongPress={() => handleMessageLongPress(item)}
+          >
             <View
               style={[
                 styles.bubble,
@@ -1340,6 +1349,7 @@ const Home = ({ componentId }: Props) => {
         data={Array.isArray(messages) ? messages : []}
         keyExtractor={(item, index) => item?.id || `msg_${index}`}
         renderItem={renderMessage}
+        nestedScrollEnabled
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => {
           // 流式中减少滚动动画，降低卡顿/闪退风险

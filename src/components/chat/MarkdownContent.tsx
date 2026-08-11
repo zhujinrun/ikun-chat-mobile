@@ -62,6 +62,9 @@ type Block =
 const UL_BULLETS = ['•', '◦', '▪', '▫'] as const
 const INDENT_UNIT = 16
 const MAX_LIST_DEPTH = 6
+const MIN_TABLE_COL_WIDTH = 112
+const MAX_TABLE_COL_WIDTH = 220
+const MIN_TABLE_WIDTH = 420
 
 /**
  * 轻量 Markdown 渲染（不依赖第三方库）。
@@ -220,8 +223,18 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
           backgroundColor: colors.border,
           marginVertical: 10,
         },
-        tableWrap: {
+        tableViewport: {
+          alignSelf: 'stretch',
+          maxWidth: '100%',
           marginVertical: 8,
+        },
+        tableScroll: {
+          width: '100%',
+        },
+        tableScrollContent: {
+          paddingRight: 2,
+        },
+        tableWrap: {
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: tableBorder,
           borderRadius: 8,
@@ -243,8 +256,6 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
           paddingHorizontal: 8,
           borderRightWidth: StyleSheet.hairlineWidth,
           borderRightColor: tableBorder,
-          minWidth: 72,
-          maxWidth: 180,
           justifyContent: 'center',
         },
         tableCellLast: {
@@ -260,12 +271,6 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
           fontSize: cellFont,
           fontWeight: '700',
           lineHeight: Math.round(cellFont * 1.4),
-        },
-        tableHint: {
-          color: muted,
-          fontSize: 11,
-          marginTop: -2,
-          marginBottom: 6,
         },
         imageWrap: {
           marginVertical: 6,
@@ -425,15 +430,25 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
       { cells: pad(b.headers), header: true },
       ...b.rows.map((r) => ({ cells: pad(r), header: false })),
     ]
+    const columnWidths = measureTableColumnWidths(allRows.map((row) => row.cells), cellFont)
+    const minTableWidth =
+      colCount >= 3 ? Math.max(MIN_TABLE_WIDTH, colCount * MIN_TABLE_COL_WIDTH) : 320
+    const tableWidth = Math.max(
+      minTableWidth,
+      columnWidths.reduce((sum, width) => sum + width, 0)
+    )
     return (
-      <View key={key}>
+      <View key={key} style={styles.tableViewport}>
         <ScrollView
           horizontal
           nestedScrollEnabled
+          directionalLockEnabled
           showsHorizontalScrollIndicator
-          style={{ marginVertical: 4 }}
+          style={styles.tableScroll}
+          contentContainerStyle={styles.tableScrollContent}
+          keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.tableWrap}>
+          <View style={[styles.tableWrap, { width: tableWidth }]}>
             {allRows.map((row, ri) => (
               <View
                 key={`${key}-r${ri}`}
@@ -446,14 +461,17 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
                 {row.cells.map((cell, ci) => (
                   <View
                     key={`${key}-r${ri}-c${ci}`}
-                    style={[styles.tableCell, ci === colCount - 1 && styles.tableCellLast]}
+                    style={[
+                      styles.tableCell,
+                      { width: columnWidths[ci] },
+                      ci === colCount - 1 && styles.tableCellLast,
+                    ]}
                   >
                     <Text
                       style={[
                         row.header ? styles.tableHeaderText : styles.tableCellText,
                         alignStyle(ci),
                       ]}
-                      selectable
                     >
                       {renderInlines(
                         parseInlines(cell),
@@ -467,7 +485,6 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
             ))}
           </View>
         </ScrollView>
-        {colCount > 3 ? <Text style={styles.tableHint}>左右滑动查看更多</Text> : null}
       </View>
     )
   }
@@ -650,6 +667,42 @@ function MarkdownImage({
       />
     </View>
   )
+}
+
+function measureTableColumnWidths(rows: string[][], cellFont: number): number[] {
+  const colCount = Math.max(1, ...rows.map((row) => row.length))
+  const widths = Array.from({ length: colCount }, (_, colIndex) => {
+    const maxUnits = Math.max(
+      4,
+      ...rows.map((row) => measureTextUnits(row[colIndex] || ''))
+    )
+    const width = Math.ceil(maxUnits * cellFont * 0.58 + 28)
+    return Math.min(MAX_TABLE_COL_WIDTH, Math.max(MIN_TABLE_COL_WIDTH, width))
+  })
+  const total = widths.reduce((sum, width) => sum + width, 0)
+  if (total >= MIN_TABLE_WIDTH) return widths
+
+  const extra = (MIN_TABLE_WIDTH - total) / colCount
+  return widths.map((width) => Math.ceil(width + extra))
+}
+
+function measureTextUnits(raw: string): number {
+  const text = getPlainTableText(raw)
+  if (!text) return 4
+  return Array.from(text).reduce((sum, ch) => {
+    if (/\s/.test(ch)) return sum + 0.35
+    if (/[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/.test(ch)) return sum + 1.8
+    if (/[A-Z0-9]/.test(ch)) return sum + 1.05
+    return sum + 0.9
+  }, 0)
+}
+
+function getPlainTableText(raw: string): string {
+  return (raw || '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_~`]+/g, '')
+    .trim()
 }
 
 // ─── block parser ───────────────────────────────────────────────
