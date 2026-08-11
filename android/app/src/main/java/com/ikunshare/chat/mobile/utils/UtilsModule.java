@@ -42,12 +42,22 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class UtilsModule extends ReactContextBaseJavaModule {
   private static final int PICK_FILES_REQUEST = 8301;
+  private static final int MAX_EXTRACTED_TEXT_CHARS = 120000;
 
   private final ReactApplicationContext reactContext;
   private Promise pickFilesPromise;
@@ -377,7 +387,7 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     }).start();
   }
 
-  /** 打开系统文件选择器，选择文本类文件并复制到应用内部 cache/attachments 目录。 */
+  /** 打开系统文件选择器，选择任意可打开文件并复制到应用内部 cache/attachments 目录。 */
   @ReactMethod
   public void pickFiles(ReadableArray mimeTypes, double maxBytes, Promise promise) {
     Activity currentActivity = getCurrentActivity();
@@ -538,6 +548,64 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     }).start();
   }
 
+  @ReactMethod
+  public void readFileDataUrl(String uriStr, String mimeType, double maxBytes, Promise promise) {
+    new Thread(() -> {
+      try {
+        if (uriStr == null || uriStr.isEmpty()) {
+          promise.reject("EMPTY_URI", "文件地址为空");
+          return;
+        }
+        byte[] bytes = readUri(Uri.parse(uriStr), Math.max(1, (long) maxBytes));
+        if (bytes == null || bytes.length == 0) {
+          promise.reject("READ_FAILED", "读取文件失败");
+          return;
+        }
+        String safeMime =
+          mimeType != null && !mimeType.trim().isEmpty()
+            ? mimeType.trim()
+            : "application/octet-stream";
+        String base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+        promise.resolve("data:" + safeMime + ";base64," + base64);
+      } catch (Exception e) {
+        Log.e("Utils", "readFileDataUrl error", e);
+        promise.reject("READ_FILE", e.getMessage() != null ? e.getMessage() : "读取文件失败");
+      }
+    }).start();
+  }
+
+  @ReactMethod
+  public void extractFileText(
+    String uriStr,
+    String mimeType,
+    String name,
+    double maxBytes,
+    Promise promise
+  ) {
+    new Thread(() -> {
+      try {
+        if (uriStr == null || uriStr.isEmpty()) {
+          promise.reject("EMPTY_URI", "文件地址为空");
+          return;
+        }
+        byte[] bytes = readUri(Uri.parse(uriStr), Math.max(1, (long) maxBytes));
+        if (bytes == null || bytes.length == 0) {
+          promise.reject("READ_FAILED", "读取文件失败");
+          return;
+        }
+        String text = extractReadableText(bytes, mimeType, name);
+        if (text == null || text.trim().isEmpty()) {
+          promise.reject("EXTRACT_EMPTY", "未提取到可读内容");
+          return;
+        }
+        promise.resolve(limitExtractedText(text));
+      } catch (Exception e) {
+        Log.e("Utils", "extractFileText error", e);
+        promise.reject("EXTRACT_FILE", e.getMessage() != null ? e.getMessage() : "提取文件内容失败");
+      }
+    }).start();
+  }
+
   /**
    * 读取本地图片并返回 data: dataUrl（仅在发送/重发请求时临时生成，不落盘）。
    */
@@ -684,12 +752,483 @@ public class UtilsModule extends ReactContextBaseJavaModule {
 
   private String guessMimeFromName(String name) {
     String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+    if (lower.endsWith(".pdf")) return "application/pdf";
+    if (lower.endsWith(".doc")) return "application/msword";
+    if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+    if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (lower.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+    if (lower.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    if (lower.endsWith(".zip")) return "application/zip";
+    if (lower.endsWith(".gz")) return "application/gzip";
+    if (lower.endsWith(".tar")) return "application/x-tar";
     if (lower.endsWith(".json")) return "application/json";
     if (lower.endsWith(".csv")) return "text/csv";
     if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "text/markdown";
     if (lower.endsWith(".xml")) return "application/xml";
     if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "application/yaml";
-    return "text/plain";
+    if (
+      lower.endsWith(".txt") ||
+      lower.endsWith(".log") ||
+      lower.endsWith(".properties") ||
+      lower.endsWith(".env")
+    ) {
+      return "text/plain";
+    }
+    return "application/octet-stream";
+  }
+
+  private String extractReadableText(byte[] bytes, String mimeType, String name) throws Exception {
+    String ext = getFileExtension(name);
+    String mime = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
+    if (isZipFile(bytes)) {
+      if ("xlsx".equals(ext) || mime.contains("spreadsheetml")) return extractXlsxText(bytes);
+      if ("docx".equals(ext) || mime.contains("wordprocessingml")) return extractDocxText(bytes);
+      if ("pptx".equals(ext) || mime.contains("presentationml")) return extractPptxText(bytes);
+    }
+
+    String decoded = decodeLikelyText(bytes);
+    if (decoded != null && isReadableText(decoded)) {
+      if ("xls".equals(ext) || mime.contains("ms-excel")) {
+        String legacyExcelText = extractLegacyExcelText(decoded);
+        if (legacyExcelText != null && !legacyExcelText.trim().isEmpty()) return legacyExcelText;
+      }
+      if (looksLikeHtml(decoded)) return htmlToText(decoded);
+      return decoded.trim();
+    }
+
+    if ("xls".equals(ext) || mime.contains("ms-excel")) {
+      String binaryText = extractBinaryStrings(bytes);
+      if (binaryText != null && !binaryText.trim().isEmpty()) return binaryText;
+    }
+    return null;
+  }
+
+  private String getFileExtension(String name) {
+    String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+    int dot = lower.lastIndexOf('.');
+    return dot >= 0 ? lower.substring(dot + 1) : "";
+  }
+
+  private boolean isZipFile(byte[] bytes) {
+    return bytes.length >= 4 &&
+      bytes[0] == (byte) 0x50 &&
+      bytes[1] == (byte) 0x4B &&
+      bytes[2] == (byte) 0x03 &&
+      bytes[3] == (byte) 0x04;
+  }
+
+  private String decodeLikelyText(byte[] bytes) {
+    if (bytes.length >= 2) {
+      if (bytes[0] == (byte) 0xFF && bytes[1] == (byte) 0xFE) {
+        return new String(bytes, 2, bytes.length - 2, Charset.forName("UTF-16LE"));
+      }
+      if (bytes[0] == (byte) 0xFE && bytes[1] == (byte) 0xFF) {
+        return new String(bytes, 2, bytes.length - 2, Charset.forName("UTF-16BE"));
+      }
+    }
+    String utf8 = new String(bytes, StandardCharsets.UTF_8);
+    if (isReadableText(utf8)) return stripBom(utf8);
+    try {
+      String gb = new String(bytes, Charset.forName("GB18030"));
+      if (isReadableText(gb)) return stripBom(gb);
+    } catch (Exception ignored) {
+      // ignore
+    }
+    return null;
+  }
+
+  private String stripBom(String text) {
+    return text != null && text.startsWith("\uFEFF") ? text.substring(1) : text;
+  }
+
+  private boolean isReadableText(String text) {
+    if (text == null || text.trim().isEmpty()) return false;
+    int bad = 0;
+    int useful = 0;
+    int total = Math.min(text.length(), 4000);
+    for (int i = 0; i < total; i++) {
+      char c = text.charAt(i);
+      if (c == '\uFFFD' || (Character.isISOControl(c) && c != '\n' && c != '\r' && c != '\t')) {
+        bad++;
+      } else if (!Character.isWhitespace(c)) {
+        useful++;
+      }
+    }
+    return useful >= 4 && bad <= Math.max(4, total / 50);
+  }
+
+  private boolean looksLikeHtml(String text) {
+    String lower = text == null ? "" : text.toLowerCase(Locale.ROOT);
+    return lower.contains("<html") || lower.contains("<table") || lower.contains("<tr") || lower.contains("<td");
+  }
+
+  private String extractLegacyExcelText(String text) {
+    if (text == null || text.trim().isEmpty()) return "";
+    if (looksLikeHtml(text)) return htmlToText(text);
+    String spreadsheetText = spreadsheetXmlToText(text);
+    if (spreadsheetText != null && !spreadsheetText.trim().isEmpty()) return spreadsheetText;
+    return text.trim();
+  }
+
+  private String htmlToText(String html) {
+    String text = html == null ? "" : html;
+    text = text.replaceAll("(?is)<script[^>]*>.*?</script>", " ");
+    text = text.replaceAll("(?is)<style[^>]*>.*?</style>", " ");
+    List<String> rows = new ArrayList<>();
+    Matcher rowMatcher = Pattern.compile("(?is)<tr\\b[^>]*>(.*?)</tr>").matcher(text);
+    while (rowMatcher.find()) {
+      List<String> cells = new ArrayList<>();
+      Matcher cellMatcher = Pattern.compile("(?is)<t[dh]\\b[^>]*>(.*?)</t[dh]>").matcher(rowMatcher.group(1));
+      while (cellMatcher.find()) {
+        cells.add(normalizeExtractedCellText(cellMatcher.group(1)));
+      }
+      trimTrailingEmpty(cells);
+      if (!cells.isEmpty()) rows.add(joinTabs(cells));
+    }
+    if (!rows.isEmpty()) return joinLines(rows).trim();
+
+    text = text.replaceAll("(?i)</t[dh]\\s*>", "\t");
+    text = text.replaceAll("(?i)</tr\\s*>", "\n");
+    text = text.replaceAll("(?i)<br\\s*/?>", "\n");
+    text = text.replaceAll("(?is)<[^>]+>", " ");
+    text = unescapeXml(text);
+    text = text.replaceAll("[ \\x0B\\f\\r]+", " ");
+    text = text.replaceAll("\\t\\s+", "\t");
+    text = text.replaceAll("\\s+\\n", "\n");
+    text = text.replaceAll("\\n{3,}", "\n\n");
+    return text.trim();
+  }
+
+  private String spreadsheetXmlToText(String xml) {
+    String raw = xml == null ? "" : xml;
+    List<String> sheets = new ArrayList<>();
+    Matcher sheetMatcher = Pattern
+      .compile("(?is)<(?:[\\w]+:)?Worksheet\\b([^>]*)>(.*?)</(?:[\\w]+:)?Worksheet>")
+      .matcher(raw);
+    while (sheetMatcher.find()) {
+      String sheetName = getAttr(sheetMatcher.group(1), "ss:Name");
+      if (sheetName.isEmpty()) sheetName = getAttr(sheetMatcher.group(1), "Name");
+      String rows = parseSpreadsheetXmlRows(sheetMatcher.group(2));
+      if (rows.trim().isEmpty()) continue;
+      sheets.add((sheetName.isEmpty() ? "" : "# " + sheetName + "\n") + rows.trim());
+    }
+    if (!sheets.isEmpty()) return joinBlocks(sheets);
+    return parseSpreadsheetXmlRows(raw);
+  }
+
+  private String parseSpreadsheetXmlRows(String xml) {
+    List<String> lines = new ArrayList<>();
+    Matcher rowMatcher = Pattern
+      .compile("(?is)<(?:[\\w]+:)?Row\\b[^>]*>(.*?)</(?:[\\w]+:)?Row>")
+      .matcher(xml == null ? "" : xml);
+    while (rowMatcher.find()) {
+      List<String> cells = new ArrayList<>();
+      Matcher cellMatcher = Pattern
+        .compile("(?is)<(?:[\\w]+:)?Cell\\b([^>]*)>(.*?)</(?:[\\w]+:)?Cell>")
+        .matcher(rowMatcher.group(1));
+      int nextIndex = 0;
+      while (cellMatcher.find()) {
+        String attrs = cellMatcher.group(1);
+        String body = cellMatcher.group(2);
+        int colIndex = parseOneBasedIndex(getAttr(attrs, "ss:Index"), nextIndex + 1) - 1;
+        while (cells.size() < colIndex) cells.add("");
+        String value = extractXmlTextRuns(body, "Data");
+        if (value.trim().isEmpty()) value = normalizeExtractedCellText(body);
+        cells.add(value);
+        nextIndex = colIndex + 1;
+      }
+      trimTrailingEmpty(cells);
+      if (!cells.isEmpty()) lines.add(joinTabs(cells));
+    }
+    return joinLines(lines);
+  }
+
+  private int parseOneBasedIndex(String raw, int fallback) {
+    try {
+      int value = Integer.parseInt(raw == null ? "" : raw.trim());
+      return value > 0 ? value : fallback;
+    } catch (Exception ignored) {
+      return fallback;
+    }
+  }
+
+  private String extractXlsxText(byte[] bytes) throws Exception {
+    List<String> sharedStrings = new ArrayList<>();
+    List<String> sheetEntries = new ArrayList<>();
+    List<String[]> xmlEntries = readZipXmlEntries(bytes);
+    for (String[] entry : xmlEntries) {
+      if ("xl/sharedStrings.xml".equals(entry[0])) sharedStrings = parseSharedStrings(entry[1]);
+      if (entry[0].startsWith("xl/worksheets/sheet") && entry[0].endsWith(".xml")) {
+        sheetEntries.add(entry[0]);
+      }
+    }
+    Collections.sort(sheetEntries);
+    StringBuilder out = new StringBuilder();
+    int sheetIndex = 1;
+    for (String sheetEntry : sheetEntries) {
+      String xml = findZipText(xmlEntries, sheetEntry);
+      if (xml == null) continue;
+      String sheetText = parseWorksheet(xml, sharedStrings);
+      if (sheetText.trim().isEmpty()) continue;
+      if (out.length() > 0) out.append("\n\n");
+      out.append("# Sheet ").append(sheetIndex).append("\n").append(sheetText.trim());
+      sheetIndex++;
+    }
+    return out.toString();
+  }
+
+  private String extractDocxText(byte[] bytes) throws Exception {
+    List<String[]> entries = readZipXmlEntries(bytes);
+    String xml = findZipText(entries, "word/document.xml");
+    if (xml == null) return "";
+    List<String> paragraphs = new ArrayList<>();
+    Matcher pMatcher = Pattern.compile("(?is)<w:p\\b[^>]*>(.*?)</w:p>").matcher(xml);
+    while (pMatcher.find()) {
+      String paragraph = extractXmlTextRuns(pMatcher.group(1), "w:t");
+      if (!paragraph.trim().isEmpty()) paragraphs.add(paragraph.trim());
+    }
+    return joinLines(paragraphs);
+  }
+
+  private String extractPptxText(byte[] bytes) throws Exception {
+    List<String[]> entries = readZipXmlEntries(bytes);
+    List<String> slideEntries = new ArrayList<>();
+    for (String[] entry : entries) {
+      if (entry[0].startsWith("ppt/slides/slide") && entry[0].endsWith(".xml")) slideEntries.add(entry[0]);
+    }
+    Collections.sort(slideEntries);
+    List<String> slides = new ArrayList<>();
+    int index = 1;
+    for (String slide : slideEntries) {
+      String xml = findZipText(entries, slide);
+      if (xml == null) continue;
+      String text = extractXmlTextRuns(xml, "a:t");
+      if (!text.trim().isEmpty()) {
+        slides.add("# Slide " + index + "\n" + text.trim());
+      }
+      index++;
+    }
+    return joinBlocks(slides);
+  }
+
+  private List<String[]> readZipXmlEntries(byte[] bytes) throws Exception {
+    List<String[]> result = new ArrayList<>();
+    ZipInputStream zis = new ZipInputStream(new java.io.ByteArrayInputStream(bytes));
+    ZipEntry entry;
+    byte[] chunk = new byte[8192];
+    while ((entry = zis.getNextEntry()) != null) {
+      if (!entry.isDirectory() && entry.getName().endsWith(".xml")) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int read;
+        while ((read = zis.read(chunk)) != -1) out.write(chunk, 0, read);
+        result.add(new String[] { entry.getName(), new String(out.toByteArray(), StandardCharsets.UTF_8) });
+      }
+      zis.closeEntry();
+    }
+    zis.close();
+    return result;
+  }
+
+  private String findZipText(List<String[]> entries, String name) {
+    for (String[] entry : entries) {
+      if (name.equals(entry[0])) return entry[1];
+    }
+    return null;
+  }
+
+  private List<String> parseSharedStrings(String xml) {
+    List<String> strings = new ArrayList<>();
+    Matcher matcher = Pattern.compile("(?is)<si\\b[^>]*>(.*?)</si>").matcher(xml);
+    while (matcher.find()) strings.add(extractXmlTextRuns(matcher.group(1), "t"));
+    return strings;
+  }
+
+  private String parseWorksheet(String xml, List<String> sharedStrings) {
+    List<String> lines = new ArrayList<>();
+    Matcher rowMatcher = Pattern.compile("(?is)<row\\b[^>]*>(.*?)</row>").matcher(xml);
+    while (rowMatcher.find()) {
+      List<String> cells = new ArrayList<>();
+      Matcher cellMatcher = Pattern.compile("(?is)<c\\b([^>]*)>(.*?)</c>").matcher(rowMatcher.group(1));
+      int nextIndex = 0;
+      while (cellMatcher.find()) {
+        String attrs = cellMatcher.group(1);
+        String body = cellMatcher.group(2);
+        int colIndex = getCellColumnIndex(getAttr(attrs, "r"), nextIndex);
+        while (cells.size() < colIndex) cells.add("");
+        cells.add(getCellValue(attrs, body, sharedStrings));
+        nextIndex = colIndex + 1;
+      }
+      trimTrailingEmpty(cells);
+      if (!cells.isEmpty()) lines.add(joinTabs(cells));
+    }
+    return joinLines(lines);
+  }
+
+  private String getCellValue(String attrs, String body, List<String> sharedStrings) {
+    String type = getAttr(attrs, "t");
+    if ("s".equals(type)) {
+      String raw = firstXmlTagText(body, "v");
+      try {
+        int index = Integer.parseInt(raw.trim());
+        return index >= 0 && index < sharedStrings.size() ? sharedStrings.get(index) : raw;
+      } catch (Exception ignored) {
+        return raw;
+      }
+    }
+    if ("inlineStr".equals(type)) return extractXmlTextRuns(body, "t");
+    return firstXmlTagText(body, "v");
+  }
+
+  private int getCellColumnIndex(String ref, int fallback) {
+    if (ref == null || ref.isEmpty()) return fallback;
+    int col = 0;
+    for (int i = 0; i < ref.length(); i++) {
+      char c = Character.toUpperCase(ref.charAt(i));
+      if (c < 'A' || c > 'Z') break;
+      col = col * 26 + (c - 'A' + 1);
+    }
+    return col > 0 ? col - 1 : fallback;
+  }
+
+  private String getAttr(String attrs, String key) {
+    Matcher matcher = Pattern
+      .compile("\\b" + Pattern.quote(key) + "\\s*=\\s*([\"'])(.*?)\\1")
+      .matcher(attrs == null ? "" : attrs);
+    return matcher.find() ? unescapeXml(matcher.group(2)).trim() : "";
+  }
+
+  private String firstXmlTagText(String xml, String tag) {
+    Matcher matcher = Pattern.compile("(?is)<(?:[\\w]+:)?" + tag + "\\b[^>]*>(.*?)</(?:[\\w]+:)?" + tag + ">").matcher(xml == null ? "" : xml);
+    return matcher.find() ? unescapeXml(stripTags(matcher.group(1))).trim() : "";
+  }
+
+  private String extractXmlTextRuns(String xml, String tag) {
+    List<String> values = new ArrayList<>();
+    Matcher matcher = Pattern.compile("(?is)<(?:[\\w]+:)?" + tag + "\\b[^>]*>(.*?)</(?:[\\w]+:)?" + tag + ">").matcher(xml == null ? "" : xml);
+    while (matcher.find()) values.add(unescapeXml(stripTags(matcher.group(1))));
+    return joinWith(values, "").trim();
+  }
+
+  private String stripTags(String raw) {
+    return (raw == null ? "" : raw).replaceAll("(?is)<[^>]+>", "");
+  }
+
+  private String normalizeExtractedCellText(String raw) {
+    String text = raw == null ? "" : raw;
+    text = text.replaceAll("(?i)<br\\s*/?>", "\n");
+    text = unescapeXml(stripTags(text));
+    text = text.replaceAll("[ \\x0B\\f\\r]+", " ");
+    text = text.replaceAll("\\s+\\n", "\n");
+    text = text.replaceAll("\\n\\s+", "\n");
+    return text.trim();
+  }
+
+  private String unescapeXml(String raw) {
+    String text = (raw == null ? "" : raw)
+      .replace("&nbsp;", " ")
+      .replace("&amp;", "&")
+      .replace("&lt;", "<")
+      .replace("&gt;", ">")
+      .replace("&quot;", "\"")
+      .replace("&apos;", "'");
+    Matcher matcher = Pattern.compile("&#(x[0-9a-fA-F]+|\\d+);").matcher(text);
+    StringBuffer out = new StringBuffer();
+    while (matcher.find()) {
+      try {
+        String value = matcher.group(1);
+        int codePoint = value.startsWith("x") || value.startsWith("X")
+          ? Integer.parseInt(value.substring(1), 16)
+          : Integer.parseInt(value, 10);
+        matcher.appendReplacement(out, Matcher.quoteReplacement(new String(Character.toChars(codePoint))));
+      } catch (Exception ignored) {
+        matcher.appendReplacement(out, Matcher.quoteReplacement(matcher.group(0)));
+      }
+    }
+    matcher.appendTail(out);
+    return out.toString();
+  }
+
+  private void trimTrailingEmpty(List<String> values) {
+    while (!values.isEmpty() && values.get(values.size() - 1).trim().isEmpty()) {
+      values.remove(values.size() - 1);
+    }
+  }
+
+  private String joinTabs(List<String> values) {
+    return joinWith(values, "\t");
+  }
+
+  private String joinLines(List<String> values) {
+    return joinWith(values, "\n");
+  }
+
+  private String joinBlocks(List<String> values) {
+    return joinWith(values, "\n\n");
+  }
+
+  private String joinWith(List<String> values, String separator) {
+    StringBuilder builder = new StringBuilder();
+    for (int i = 0; i < values.size(); i++) {
+      if (i > 0) builder.append(separator);
+      builder.append(values.get(i));
+    }
+    return builder.toString();
+  }
+
+  private String extractBinaryStrings(byte[] bytes) {
+    LinkedHashSet<String> strings = new LinkedHashSet<>();
+    collectAsciiStrings(bytes, strings);
+    collectUtf16LeStrings(bytes, strings, 0);
+    collectUtf16LeStrings(bytes, strings, 1);
+    return joinLines(new ArrayList<>(strings));
+  }
+
+  private void collectAsciiStrings(byte[] bytes, LinkedHashSet<String> out) {
+    StringBuilder run = new StringBuilder();
+    for (byte b : bytes) {
+      int v = b & 0xFF;
+      if (v == 9 || v == 10 || v == 13 || (v >= 32 && v <= 126)) {
+        run.append((char) v);
+      } else {
+        flushRun(run, out, 4);
+      }
+    }
+    flushRun(run, out, 4);
+  }
+
+  private void collectUtf16LeStrings(byte[] bytes, LinkedHashSet<String> out, int offset) {
+    StringBuilder run = new StringBuilder();
+    for (int i = offset; i + 1 < bytes.length; i += 2) {
+      int code = (bytes[i] & 0xFF) | ((bytes[i + 1] & 0xFF) << 8);
+      char c = (char) code;
+      if ((c == '\t' || c == '\n' || c == '\r') || (!Character.isISOControl(c) && code >= 32)) {
+        run.append(c);
+      } else {
+        flushRun(run, out, 2);
+      }
+    }
+    flushRun(run, out, 2);
+  }
+
+  private void flushRun(StringBuilder run, LinkedHashSet<String> out, int minLen) {
+    String text = run.toString().trim();
+    if (text.length() >= minLen && hasUsefulText(text)) out.add(text);
+    run.setLength(0);
+  }
+
+  private boolean hasUsefulText(String text) {
+    if (text == null) return false;
+    for (int i = 0; i < text.length(); i++) {
+      if (Character.isLetterOrDigit(text.charAt(i))) return true;
+    }
+    return false;
+  }
+
+  private String limitExtractedText(String text) {
+    String trimmed = text == null ? "" : text.trim();
+    if (trimmed.length() <= MAX_EXTRACTED_TEXT_CHARS) return trimmed;
+    return trimmed.substring(0, MAX_EXTRACTED_TEXT_CHARS) + "\n...[内容过长，已截断]";
   }
 
   private String detectImageMime(byte[] bytes) {

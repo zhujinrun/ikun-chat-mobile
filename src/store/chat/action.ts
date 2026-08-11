@@ -1,6 +1,6 @@
 import { chatCompletionsStream } from '@/core/api'
 import type { ApiMessage, ApiMessageContentPart } from '@/core/api'
-import { readImageDataUrl, readTextFile } from '@/utils/nativeModules/utils'
+import { extractFileText, readFileDataUrl, readImageDataUrl } from '@/utils/nativeModules/utils'
 import conversationAction from '@/store/conversation/action'
 import conversationState from '@/store/conversation/state'
 import settingState from '@/store/setting/state'
@@ -20,7 +20,7 @@ class AttachmentReadError extends Error {
 const isAttachmentReadError = (err: unknown): err is AttachmentReadError =>
   Array.isArray((err as AttachmentReadError | undefined)?.attachmentUris)
 
-const MAX_TEXT_FILE_BYTES = 512 * 1024
+const MAX_FILE_BYTES = 10 * 1024 * 1024
 
 /** 取一张图片附件的 dataUrl：优先旧数据里已存的 base64，否则从本地缓存文件实时读取 */
 const resolveAttachmentDataUrl = async (
@@ -42,16 +42,15 @@ const resolveAttachmentDataUrl = async (
   )
 }
 
-const resolveFileText = async (attachment: LX.ChatAttachment): Promise<string> => {
-  const label = attachment.name ? `「${attachment.name}」` : '文件'
-  if (!attachment.uri || !/^(?:file|content):/.test(attachment.uri)) {
-    throw new AttachmentReadError(
-      `${label}地址不可读取，请重新选择文件后再发送`,
-      attachment.uri ? [attachment.uri] : []
-    )
-  }
+const resolveExtractedFileText = async (attachment: LX.ChatAttachment): Promise<string | null> => {
+  if (!attachment.uri || !/^(?:file|content):/.test(attachment.uri)) return null
   try {
-    const text = await readTextFile(attachment.uri, MAX_TEXT_FILE_BYTES)
+    const text = await extractFileText(
+      attachment.uri,
+      attachment.mimeType || 'application/octet-stream',
+      attachment.name || '文件',
+      MAX_FILE_BYTES
+    )
     return [
       `文件：${attachment.name || '未命名文件'}`,
       attachment.mimeType ? `类型：${attachment.mimeType}` : '',
@@ -60,27 +59,74 @@ const resolveFileText = async (attachment: LX.ChatAttachment): Promise<string> =
       text,
     ].filter(Boolean).join('\n')
   } catch {
+    return null
+  }
+}
+
+const resolveFilePart = async (attachment: LX.ChatAttachment): Promise<ApiMessageContentPart> => {
+  const label = attachment.name ? `「${attachment.name}」` : '文件'
+  if (!attachment.uri || !/^(?:file|content):/.test(attachment.uri)) {
+    throw new AttachmentReadError(
+      `${label}地址不可读取，请重新选择文件后再发送`,
+      attachment.uri ? [attachment.uri] : []
+    )
+  }
+  try {
+    const fileData = await readFileDataUrl(
+      attachment.uri,
+      attachment.mimeType || 'application/octet-stream',
+      MAX_FILE_BYTES
+    )
+    return {
+      type: 'file',
+      file: {
+        filename: attachment.name || 'attachment',
+        file_data: fileData,
+      },
+    }
+  } catch {
     throw new AttachmentReadError(`${label}读取失败，请重新选择文件后再发送`, [attachment.uri])
   }
 }
 
 const buildUserContent = async (message: LX.ChatMessage): Promise<ApiMessage['content']> => {
   const imageParts: ApiMessageContentPart[] = []
+  const fileParts: ApiMessageContentPart[] = []
   const fileBlocks: string[] = []
+  const fileSummaries: string[] = []
   for (const attachment of message.attachments || []) {
     if (attachment.type === 'image') {
       const url = await resolveAttachmentDataUrl(attachment)
       imageParts.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
     } else if (attachment.type === 'file') {
-      fileBlocks.push(await resolveFileText(attachment))
+      const extracted = await resolveExtractedFileText(attachment)
+      if (extracted) {
+        fileBlocks.push(extracted)
+        continue
+      }
+      fileSummaries.push(
+        [
+          `文件：${attachment.name || '未命名文件'}`,
+          attachment.mimeType ? `类型：${attachment.mimeType}` : '',
+          attachment.size ? `大小：${Math.round(attachment.size / 1024)}KB` : '',
+          '本地未提取到可读文本，已附加原始文件数据',
+        ].filter(Boolean).join('，')
+      )
+      fileParts.push(await resolveFilePart(attachment))
     }
   }
-  const text = [message.content.trim(), ...fileBlocks.map((block) => `<file>\n${block}\n</file>`)]
+  const text = [
+    message.content.trim() || (fileBlocks.length || fileParts.length ? '请结合附件内容回答。' : ''),
+    fileBlocks.length ? '以下是本地解析出的附件内容，请优先基于这些内容回答：' : '',
+    ...fileSummaries,
+    ...fileBlocks.map((block) => `<file>\n${block}\n</file>`),
+  ]
     .filter(Boolean)
     .join('\n\n')
-  if (!imageParts.length) return text
+  if (!imageParts.length && !fileParts.length) return text
   const parts: ApiMessageContentPart[] = []
   if (text) parts.push({ type: 'text', text })
+  parts.push(...fileParts)
   parts.push(...imageParts)
   return parts
 }

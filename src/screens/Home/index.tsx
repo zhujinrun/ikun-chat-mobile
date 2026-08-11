@@ -49,7 +49,7 @@ import {
   copyImageToClipboard,
   cacheImageTo,
   deleteLocalFiles,
-  pickTextFiles,
+  pickFiles,
 } from '@/utils/nativeModules/utils'
 import { markMediaPickerOpened, markMediaPickerSettled } from '@/utils/appResumeRepair'
 import {
@@ -94,7 +94,7 @@ type ConversationSection = {
 const MAX_IMAGE_ATTACHMENTS = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const MAX_FILE_ATTACHMENTS = 3
-const MAX_TEXT_FILE_BYTES = 512 * 1024
+const MAX_FILE_BYTES = 10 * 1024 * 1024
 const DAY_MS = 24 * 60 * 60 * 1000
 const DRAWER_SWIPE_EDGE_WIDTH = 10
 const DRAWER_SWIPE_DISTANCE = 56
@@ -553,14 +553,14 @@ const Home = ({ componentId }: Props) => {
     setAttachMenuOpen(false)
     markMediaPickerOpened()
     try {
-      const result = await pickTextFiles(MAX_TEXT_FILE_BYTES)
+      const result = await pickFiles(MAX_FILE_BYTES)
       if (result.didCancel) return
       const picked = result.files.slice(0, remainingFileSlots).map<LX.ChatAttachment>((file) => ({
         id: createId('att_'),
         type: 'file',
         uri: file.uri,
-        mimeType: file.mimeType || 'text/plain',
-        name: file.name || '文件.txt',
+        mimeType: file.mimeType || 'application/octet-stream',
+        name: file.name || '文件',
         size: file.size,
       }))
       const overLimit = Math.max(0, result.files.length - picked.length)
@@ -569,8 +569,8 @@ const Home = ({ componentId }: Props) => {
         const hasTooLarge = skipped.some((item) => item.reason === 'tooLarge')
         toast(
           hasTooLarge
-            ? `文件需小于 ${formatFileSize(MAX_TEXT_FILE_BYTES)}`
-            : '文件读取失败，请换一个文本文件试试'
+            ? `文件需小于 ${formatFileSize(MAX_FILE_BYTES)}`
+            : '文件读取失败，请换一个文件试试'
         )
         return
       }
@@ -583,7 +583,7 @@ const Home = ({ componentId }: Props) => {
         const tooLarge = skipped.filter((item) => item.reason === 'tooLarge').length
         const unreadable = skipped.length - tooLarge
         const reasons = [
-          tooLarge ? `${tooLarge} 个超过 ${formatFileSize(MAX_TEXT_FILE_BYTES)}` : '',
+          tooLarge ? `${tooLarge} 个超过 ${formatFileSize(MAX_FILE_BYTES)}` : '',
           unreadable ? `${unreadable} 个不可读取` : '',
           overLimit ? `${overLimit} 个超过剩余名额` : '',
         ].filter(Boolean)
@@ -2209,7 +2209,7 @@ const Home = ({ componentId }: Props) => {
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
               {remainingFileSlots > 0
-                ? `还可添加 ${remainingFileSlots} 个 · 单个 ≤ ${formatFileSize(MAX_TEXT_FILE_BYTES)} · 支持文本类文件`
+                ? `还可添加 ${remainingFileSlots} 个 · 单个 ≤ ${formatFileSize(MAX_FILE_BYTES)} · 可读内容随消息发送`
                 : `已达 ${MAX_FILE_ATTACHMENTS} 个上限，可先移除一个`}
             </Text>
           </View>

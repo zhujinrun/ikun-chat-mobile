@@ -2,28 +2,18 @@ import { NativeModules, Platform } from 'react-native'
 
 const { UtilsModule } = NativeModules
 
-export type PickedTextFile = {
+export type PickedFile = {
   uri: string
   name?: string
   mimeType: string
   size?: number
 }
 
-export type PickTextFilesResult = {
+export type PickFilesResult = {
   didCancel?: boolean
-  files: PickedTextFile[]
+  files: PickedFile[]
   skipped: Array<{ name?: string; size?: number; reason: 'tooLarge' | 'unreadable' }>
 }
-
-const TEXT_FILE_MIME_TYPES = [
-  'text/*',
-  'application/json',
-  'application/xml',
-  'application/javascript',
-  'application/typescript',
-  'application/yaml',
-  'application/x-yaml',
-]
 
 /** 将本地图片文件复制到系统剪贴板（原生写入，粘贴到其他应用可用） */
 export const copyImageToClipboard = async (uri: string): Promise<void> => {
@@ -60,11 +50,11 @@ export const readImageDataUrl = async (uri: string): Promise<string> => {
   return result
 }
 
-export const pickTextFiles = async (maxBytes: number): Promise<PickTextFilesResult> => {
+export const pickFiles = async (maxBytes: number): Promise<PickFilesResult> => {
   if (Platform.OS !== 'android' || !UtilsModule?.pickFiles) {
     throw new Error('当前版本暂不支持选择文件')
   }
-  const result = await UtilsModule.pickFiles(TEXT_FILE_MIME_TYPES, maxBytes)
+  const result = await UtilsModule.pickFiles([], maxBytes)
   return {
     didCancel: !!result?.didCancel,
     files: Array.isArray(result?.files) ? result.files : [],
@@ -78,6 +68,38 @@ export const readTextFile = async (uri: string, maxBytes: number): Promise<strin
   }
   const result = await UtilsModule.readTextFile(uri, maxBytes)
   if (typeof result !== 'string' || !result.trim()) throw new Error('文件内容为空')
+  return result
+}
+
+export const extractFileText = async (
+  uri: string,
+  mimeType: string,
+  name: string,
+  maxBytes: number
+): Promise<string> => {
+  if (Platform.OS !== 'android' || !uri || !UtilsModule?.extractFileText) {
+    throw new Error('当前版本不支持提取文件内容')
+  }
+  const result = await UtilsModule.extractFileText(
+    uri,
+    mimeType || 'application/octet-stream',
+    name || '文件',
+    maxBytes
+  )
+  if (typeof result !== 'string' || !result.trim()) throw new Error('未提取到可读内容')
+  return result
+}
+
+export const readFileDataUrl = async (
+  uri: string,
+  mimeType: string,
+  maxBytes: number
+): Promise<string> => {
+  if (Platform.OS !== 'android' || !uri || !UtilsModule?.readFileDataUrl) {
+    throw new Error('当前版本不支持读取文件')
+  }
+  const result = await UtilsModule.readFileDataUrl(uri, mimeType || 'application/octet-stream', maxBytes)
+  if (typeof result !== 'string' || !result) throw new Error('读取文件失败')
   return result
 }
 
