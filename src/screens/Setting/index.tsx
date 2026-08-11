@@ -35,6 +35,30 @@ const FONT_SIZE_OPTIONS = [
   { value: 20, label: '超大' },
 ]
 
+const ENDPOINT_MODE_OPTIONS: Array<{
+  value: LX.ApiEndpointMode
+  label: string
+  desc: string
+}> = [
+  { value: 'chat_completions', label: '兼容 Chat', desc: '走 /chat/completions，文件先本地解析' },
+  { value: 'responses', label: 'Responses', desc: '走 /responses，可原文件直传' },
+]
+
+const FILE_HANDLING_OPTIONS: Array<{
+  value: LX.FileHandlingMode
+  label: string
+  desc: string
+}> = [
+  { value: 'local_extract', label: '本地解析优先', desc: '提取失败再附加原始数据' },
+  { value: 'direct_file', label: '原文件直传', desc: '需要 Responses 支持' },
+]
+
+const endpointModeLabel = (mode?: LX.ApiEndpointMode) =>
+  mode === 'responses' ? 'Responses' : 'Chat'
+
+const fileHandlingLabel = (mode?: LX.FileHandlingMode) =>
+  mode === 'direct_file' ? '原文件直传' : '本地解析优先'
+
 type Props = {
   componentId: string
 }
@@ -103,6 +127,8 @@ const Setting = (_props: Props) => {
   const [apiKey, setApiKey] = useState('')
   const [extraHeaders, setExtraHeaders] = useState('')
   const [extraHeadersError, setExtraHeadersError] = useState<string | null>(null)
+  const [endpointMode, setEndpointMode] = useState<LX.ApiEndpointMode>('chat_completions')
+  const [fileHandling, setFileHandling] = useState<LX.FileHandlingMode>('local_extract')
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState(setting['chat.systemPrompt'])
   const [temperature, setTemperature] = useState(String(setting['chat.temperature']))
@@ -128,11 +154,15 @@ const Setting = (_props: Props) => {
     setBaseUrl(selectedStation.baseUrl)
     setApiKey(selectedStation.apiKey)
     setExtraHeaders(selectedStation.extraHeaders)
+    setEndpointMode(selectedStation.endpointMode || 'chat_completions')
+    setFileHandling(selectedStation.fileHandling || 'local_extract')
     setExtraHeadersError(null)
   }, [
     selectedStation?.apiKey,
     selectedStation?.baseUrl,
+    selectedStation?.endpointMode,
     selectedStation?.extraHeaders,
+    selectedStation?.fileHandling,
     selectedStation?.id,
     selectedStation?.name,
   ])
@@ -172,18 +202,22 @@ const Setting = (_props: Props) => {
       return false
     }
     const normalized = normalizeBaseUrl(baseUrl)
+    const safeFileHandling = endpointMode === 'responses' ? fileHandling : 'local_extract'
     await stationAction.updateStation(selectedStation.id, {
       name: stationName.trim() || selectedStation.name,
       baseUrl: normalized || baseUrl.trim(),
       apiKey: apiKey.trim(),
       extraHeaders: extraHeaders.trim(),
+      endpointMode,
+      fileHandling: safeFileHandling,
     })
+    if (safeFileHandling !== fileHandling) setFileHandling(safeFileHandling)
     if (normalized && normalized !== baseUrl.trim()) {
       setBaseUrl(normalized)
     }
     toast('中转站已保存')
     return true
-  }, [apiKey, baseUrl, extraHeaders, selectedStation, stationName])
+  }, [apiKey, baseUrl, endpointMode, extraHeaders, fileHandling, selectedStation, stationName])
 
   const saveChat = useCallback(() => {
     const temp = parseFloat(temperature)
@@ -377,6 +411,9 @@ const Setting = (_props: Props) => {
                     <Text style={[styles.stationCardMeta, { color: colors.textSecondary }]}>
                       {usageCount} 个会话使用
                     </Text>
+                    <Text style={[styles.stationCardMeta, { color: colors.textSecondary }]}>
+                      {endpointModeLabel(station.endpointMode)} · {fileHandlingLabel(station.fileHandling)}
+                    </Text>
                     <Text
                       style={[styles.stationCardMeta, { color: colors.textSecondary }]}
                       numberOfLines={1}
@@ -446,6 +483,91 @@ const Setting = (_props: Props) => {
           keyboardType="url"
           helper="支持填主机或带 /v1 的地址，将自动规范化"
         />
+        <Text style={[styles.label, { color: colors.textSecondary }]}>接口模式</Text>
+        <View style={styles.optionGrid}>
+          {ENDPOINT_MODE_OPTIONS.map((option) => {
+            const selected = endpointMode === option.value
+            return (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.optionChip,
+                  {
+                    backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
+                    borderColor: selected ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => {
+                  setEndpointMode(option.value)
+                  if (option.value !== 'responses') setFileHandling('local_extract')
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`接口模式 ${option.label}，${option.desc}`}
+                accessibilityState={{ selected }}
+              >
+                <Text style={[styles.optionTitle, { color: selected ? '#fff' : colors.text }]}>
+                  {option.label}
+                </Text>
+                <Text
+                  style={[
+                    styles.optionDesc,
+                    { color: selected ? 'rgba(255,255,255,0.86)' : colors.textSecondary },
+                  ]}
+                >
+                  {option.desc}
+                </Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
+        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 10 }]}>
+          文件处理
+        </Text>
+        <View style={styles.optionGrid}>
+          {FILE_HANDLING_OPTIONS.map((option) => {
+            const selected = fileHandling === option.value
+            const direct = option.value === 'direct_file'
+            const disabled = direct && endpointMode !== 'responses'
+            return (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.optionChip,
+                  {
+                    backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
+                    borderColor: selected ? colors.primary : colors.border,
+                    opacity: disabled ? 0.55 : 1,
+                  },
+                ]}
+                onPress={() => {
+                  if (disabled) {
+                    toast('原文件直传需要先选择 Responses 接口模式')
+                    return
+                  }
+                  setFileHandling(option.value)
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`文件处理 ${option.label}，${option.desc}`}
+                accessibilityState={{ selected, disabled }}
+              >
+                <Text style={[styles.optionTitle, { color: selected ? '#fff' : colors.text }]}>
+                  {option.label}
+                </Text>
+                <Text
+                  style={[
+                    styles.optionDesc,
+                    { color: selected ? 'rgba(255,255,255,0.86)' : colors.textSecondary },
+                  ]}
+                >
+                  {option.desc}
+                </Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
+        <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
+          原文件直传会把附件作为 input_file 发送；不支持 Responses 的中转站请使用本地解析。
+        </Text>
         <FormField
           label="API Key"
           value={apiKey}
@@ -854,6 +976,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 3,
+  },
+  optionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  optionChip: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  optionTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  optionDesc: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
   },
   themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   themeChip: {

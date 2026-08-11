@@ -21,6 +21,54 @@ const buildBody = (model: string, messages: ApiMessage[], stream: boolean) => {
   return body
 }
 
+type ResponseApiResponse = {
+  output_text?: string
+  output?: Array<{ content?: Array<{ type?: string; text?: string }> }>
+  error?: { message?: string }
+}
+
+type ResponseApiEvent = {
+  type?: string
+  delta?: string
+  error?: { message?: string }
+  response?: ResponseApiResponse & { error?: { message?: string } }
+}
+
+const toResponsesContent = (content: ApiMessage['content']): unknown => {
+  if (typeof content === 'string') return content
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'input_text', text: part.text }
+    if (part.type === 'image_url') {
+      return {
+        type: 'input_image',
+        image_url: part.image_url.url,
+        detail: part.image_url.detail || 'auto',
+      }
+    }
+    return {
+      type: 'input_file',
+      filename: part.file.filename,
+      file_data: part.file.file_data,
+    }
+  })
+}
+
+const buildResponsesBody = (model: string, messages: ApiMessage[], stream: boolean) => {
+  const setting = settingState.setting
+  const body: Record<string, unknown> = {
+    model,
+    input: messages.map((message) => ({
+      role: message.role,
+      content: toResponsesContent(message.content),
+    })),
+    stream,
+    temperature: setting['chat.temperature'],
+  }
+  const maxTokens = setting['chat.maxTokens']
+  if (maxTokens && maxTokens > 0) body.max_output_tokens = maxTokens
+  return body
+}
+
 /** 兼容 string / multimodal array 等 delta 形态，统一成纯文本 */
 const normalizeContentDelta = (raw: unknown): string => {
   if (raw == null) return ''
@@ -71,6 +119,47 @@ const parseCompletionText = (raw: string): string => {
   }
 }
 
+const parseResponsesText = (raw: string): string => {
+  if (!raw.trim()) return ''
+  try {
+    const data = JSON.parse(raw) as ResponseApiResponse
+    if (data.error?.message) throw new ApiError(data.error.message)
+    if (typeof data.output_text === 'string' && data.output_text) return data.output_text
+    return (data.output || [])
+      .flatMap((item) => item.content || [])
+      .map((part) => part.text || '')
+      .join('')
+  } catch (err) {
+    if (err instanceof ApiError) throw err
+    return ''
+  }
+}
+
+const parseResponseSseData = (
+  dataStr: string,
+  emitDelta: (text: string) => void
+): 'done' | 'delta' | 'ignore' => {
+  if (!dataStr) return 'ignore'
+  if (dataStr === '[DONE]') return 'done'
+  try {
+    const event = JSON.parse(dataStr) as ResponseApiEvent
+    if (event.error?.message) throw new ApiError(event.error.message)
+    if (event.type === 'response.failed') {
+      throw new ApiError(event.response?.error?.message || 'Responses 请求失败')
+    }
+    if (event.type === 'response.output_text.delta' || event.type === 'response.refusal.delta') {
+      if (!event.delta) return 'ignore'
+      emitDelta(event.delta)
+      return 'delta'
+    }
+    if (event.type === 'response.completed') return 'done'
+    return 'ignore'
+  } catch (err) {
+    if (err instanceof ApiError) throw err
+    return 'ignore'
+  }
+}
+
 const parseSseData = (
   dataStr: string,
   emitDelta: (text: string) => void
@@ -95,7 +184,15 @@ const parseSseData = (
   }
 }
 
-const createSseConsumer = (emitDelta: (text: string) => void) => {
+type SseParser = (
+  dataStr: string,
+  emitDelta: (text: string) => void
+) => 'done' | 'delta' | 'ignore'
+
+const createSseConsumer = (
+  emitDelta: (text: string) => void,
+  parser: SseParser = parseSseData
+) => {
   let buffer = ''
 
   const consume = (text: string): SseConsumeResult => {
@@ -108,7 +205,7 @@ const createSseConsumer = (emitDelta: (text: string) => void) => {
       const trimmed = line.trim()
       if (!trimmed || trimmed.startsWith(':')) continue
       if (!trimmed.startsWith('data:')) continue
-      const result = parseSseData(trimmed.slice(5).trim(), emitDelta)
+      const result = parser(trimmed.slice(5).trim(), emitDelta)
       if (result === 'done') return { done: true, receivedAny }
       if (result === 'delta') receivedAny = true
     }
@@ -135,6 +232,28 @@ const parseXhrErrorMessage = (raw: string, statusText: string, status: number): 
   }
 }
 
+const responsesCompletions = async (
+  baseUrl: string,
+  apiKey: string,
+  extraHeaders: Record<string, string>,
+  model: string,
+  messages: ApiMessage[],
+  signal?: AbortSignal
+): Promise<string> => {
+  const res = await fetch(`${baseUrl}/responses`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, extraHeaders),
+    body: JSON.stringify(buildResponsesBody(model, messages, false)),
+    signal,
+  })
+
+  if (!res.ok) throw new ApiError(await parseErrorMessage(res), res.status)
+
+  const text = parseResponsesText(await res.text())
+  if (!text) throw new ApiError('模型返回为空')
+  return text
+}
+
 /** 非流式对话 */
 export const chatCompletions = async (
   model: string,
@@ -142,9 +261,13 @@ export const chatCompletions = async (
   signal?: AbortSignal,
   stationId?: string | null
 ): Promise<string> => {
-  const { baseUrl, apiKey, extraHeaders } = getApiConfig(stationId)
+  const { baseUrl, apiKey, extraHeaders, station } = getApiConfig(stationId)
   if (!baseUrl) throw new ApiError('请先配置 API URL')
   if (!apiKey) throw new ApiError('请先配置 API Key')
+
+  if (station?.endpointMode === 'responses') {
+    return responsesCompletions(baseUrl, apiKey, extraHeaders, model, messages, signal)
+  }
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -168,13 +291,15 @@ const chatCompletionsStreamXhr = async (
   headers: Record<string, string>,
   requestBody: string,
   emitters: StreamEmitters,
+  parser: SseParser = parseSseData,
+  parseFullText: (raw: string) => string = parseCompletionText,
   signal?: AbortSignal
 ): Promise<boolean> => {
   if (typeof XMLHttpRequest === 'undefined') return false
 
   return new Promise<boolean>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    const sse = createSseConsumer(emitters.emitDelta)
+    const sse = createSseConsumer(emitters.emitDelta, parser)
     let seenLength = 0
     let receivedAny = false
     let settled = false
@@ -271,7 +396,7 @@ const chatCompletionsStreamXhr = async (
         consumeNewText()
         handleConsumeResult(sse.flush())
         if (!receivedAny) {
-          const text = parseCompletionText(xhr.responseText || '')
+          const text = parseFullText(xhr.responseText || '')
           if (text) {
             emitters.emitDelta(text)
             receivedAny = true
@@ -316,7 +441,7 @@ export const chatCompletionsStream = async (
   signal?: AbortSignal,
   stationId?: string | null
 ): Promise<void> => {
-  const { baseUrl, apiKey, extraHeaders } = getApiConfig(stationId)
+  const { baseUrl, apiKey, extraHeaders, station } = getApiConfig(stationId)
   if (!baseUrl) throw new ApiError('请先配置 API URL')
   if (!apiKey) throw new ApiError('请先配置 API Key')
 
@@ -346,12 +471,17 @@ export const chatCompletionsStream = async (
     return
   }
 
-  const url = `${baseUrl}/chat/completions`
+  const useResponses = station?.endpointMode === 'responses'
+  const url = `${baseUrl}/${useResponses ? 'responses' : 'chat/completions'}`
+  const sseParser = useResponses ? parseResponseSseData : parseSseData
+  const fullTextParser = useResponses ? parseResponsesText : parseCompletionText
   const streamHeaders = {
     ...buildHeaders(apiKey, extraHeaders),
     Accept: 'text/event-stream',
   }
-  const streamBody = JSON.stringify(buildBody(model, messages, true))
+  const streamBody = JSON.stringify(
+    useResponses ? buildResponsesBody(model, messages, true) : buildBody(model, messages, true)
+  )
 
   try {
     const handledByXhr = await chatCompletionsStreamXhr(
@@ -359,6 +489,8 @@ export const chatCompletionsStream = async (
       streamHeaders,
       streamBody,
       { emitDelta, emitDone },
+      sseParser,
+      fullTextParser,
       signal
     )
     if (handledByXhr || signal?.aborted) return
@@ -387,7 +519,7 @@ export const chatCompletionsStream = async (
   if (!body || typeof body.getReader !== 'function') {
     try {
       const text = await res.text()
-      const full = parseSseToText(text) || parseCompletionText(text)
+      const full = parseSseToText(text, sseParser) || fullTextParser(text)
       if (full) {
         emitDelta(full)
         emitDone()
@@ -423,7 +555,7 @@ export const chatCompletionsStream = async (
     }
   }
 
-  const sse = createSseConsumer(emitDelta)
+  const sse = createSseConsumer(emitDelta, sseParser)
   let receivedAny = false
 
   try {
@@ -469,11 +601,11 @@ export const chatCompletionsStream = async (
   emitDone()
 }
 
-const parseSseToText = (raw: string): string => {
+const parseSseToText = (raw: string, parser: SseParser = parseSseData): string => {
   let out = ''
   const sse = createSseConsumer((text) => {
     out += text
-  })
+  }, parser)
   sse.consume(raw)
   sse.flush()
   return out

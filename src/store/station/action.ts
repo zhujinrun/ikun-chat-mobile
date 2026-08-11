@@ -18,6 +18,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const timestamp = () => Date.now()
 
+const sanitizeEndpointMode = (value: unknown): LX.ApiEndpointMode =>
+  value === 'responses' ? 'responses' : 'chat_completions'
+
+const sanitizeFileHandling = (value: unknown): LX.FileHandlingMode =>
+  value === 'direct_file' ? 'direct_file' : 'local_extract'
+
 const buildLegacyStation = (): LX.ApiStation => {
   const now = timestamp()
   return {
@@ -27,6 +33,8 @@ const buildLegacyStation = (): LX.ApiStation => {
     apiKey: settingState.setting['api.apiKey'] || '',
     extraHeaders: settingState.setting['api.extraHeaders'] || '',
     defaultModel: settingState.setting['api.defaultModel'] || '',
+    endpointMode: 'chat_completions',
+    fileHandling: 'local_extract',
     createdAt: now,
     updatedAt: now,
   }
@@ -47,6 +55,8 @@ const sanitizeStations = (raw: unknown): LX.ApiStation[] => {
       apiKey: typeof item.apiKey === 'string' ? item.apiKey : '',
       extraHeaders: typeof item.extraHeaders === 'string' ? item.extraHeaders : '',
       defaultModel: typeof item.defaultModel === 'string' ? item.defaultModel : '',
+      endpointMode: sanitizeEndpointMode(item.endpointMode),
+      fileHandling: sanitizeFileHandling(item.fileHandling),
       createdAt: typeof item.createdAt === 'number' ? item.createdAt : now,
       updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : now,
     })
@@ -98,6 +108,8 @@ export default {
       apiKey: '',
       extraHeaders: '',
       defaultModel: '',
+      endpointMode: 'chat_completions',
+      fileHandling: 'local_extract',
       createdAt: now,
       updatedAt: now,
     }
@@ -111,9 +123,16 @@ export default {
   async updateStation(id: string, patch: Partial<LX.ApiStation>) {
     const station = findStation(id)
     if (!station) throw new Error('中转站不存在')
+    const endpointMode = sanitizeEndpointMode(patch.endpointMode || station.endpointMode)
+    const fileHandling =
+      endpointMode === 'responses'
+        ? sanitizeFileHandling(patch.fileHandling || station.fileHandling)
+        : 'local_extract'
     Object.assign(station, patch, {
       id: station.id,
       name: patch.name?.trim() || station.name,
+      endpointMode,
+      fileHandling,
       updatedAt: timestamp(),
     })
     await persist()

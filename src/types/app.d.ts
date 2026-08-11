@@ -15,6 +15,10 @@ declare global {
       'common.fontSize': number
     }
 
+    type ApiEndpointMode = 'chat_completions' | 'responses'
+
+    type FileHandlingMode = 'local_extract' | 'direct_file'
+
     type ApiStation = {
       id: string
       name: string
@@ -22,6 +26,8 @@ declare global {
       apiKey: string
       extraHeaders: string
       defaultModel: string
+      endpointMode: ApiEndpointMode
+      fileHandling: FileHandlingMode
       createdAt: number
       updatedAt: number
     }

@@ -21,6 +21,34 @@ const isAttachmentReadError = (err: unknown): err is AttachmentReadError =>
   Array.isArray((err as AttachmentReadError | undefined)?.attachmentUris)
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024
+const STREAM_DEDUP_MIN_CHARS = 24
+
+/**
+ * 部分 Responses 兼容中转站会把累计文本或最终完整文本当作 delta 再推一次。
+ * 这里按“累计/重叠则替换或补后缀”的方式合并，避免 AI 回复整段重复展示。
+ */
+const appendStreamDelta = (current: string, delta: string): string => {
+  if (!delta) return current
+  if (!current) return delta
+  if (delta === current) return current
+
+  const normalizedDelta = delta.trimStart()
+  if (normalizedDelta.length >= STREAM_DEDUP_MIN_CHARS) {
+    if (normalizedDelta === current) return current
+    if (normalizedDelta.startsWith(current)) return normalizedDelta
+    if (current.endsWith(normalizedDelta)) return current
+    if (normalizedDelta.length >= 80 && current.includes(normalizedDelta)) return current
+  }
+
+  const maxOverlap = Math.min(current.length, delta.length)
+  for (let len = maxOverlap; len >= STREAM_DEDUP_MIN_CHARS; len--) {
+    if (current.endsWith(delta.slice(0, len))) {
+      return current + delta.slice(len)
+    }
+  }
+
+  return current + delta
+}
 
 /** 取一张图片附件的 dataUrl：优先旧数据里已存的 base64，否则从本地缓存文件实时读取 */
 const resolveAttachmentDataUrl = async (
@@ -89,16 +117,32 @@ const resolveFilePart = async (attachment: LX.ChatAttachment): Promise<ApiMessag
   }
 }
 
-const buildUserContent = async (message: LX.ChatMessage): Promise<ApiMessage['content']> => {
+const buildUserContent = async (
+  message: LX.ChatMessage,
+  fileHandling: LX.FileHandlingMode
+): Promise<ApiMessage['content']> => {
   const imageParts: ApiMessageContentPart[] = []
   const fileParts: ApiMessageContentPart[] = []
   const fileBlocks: string[] = []
   const fileSummaries: string[] = []
+  const directFiles = fileHandling === 'direct_file'
   for (const attachment of message.attachments || []) {
     if (attachment.type === 'image') {
       const url = await resolveAttachmentDataUrl(attachment)
       imageParts.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
     } else if (attachment.type === 'file') {
+      if (directFiles) {
+        fileSummaries.push(
+          [
+            `文件：${attachment.name || '未命名文件'}`,
+            attachment.mimeType ? `类型：${attachment.mimeType}` : '',
+            attachment.size ? `大小：${Math.round(attachment.size / 1024)}KB` : '',
+            '已按原文件随请求发送',
+          ].filter(Boolean).join('，')
+        )
+        fileParts.push(await resolveFilePart(attachment))
+        continue
+      }
       const extracted = await resolveExtractedFileText(attachment)
       if (extracted) {
         fileBlocks.push(extracted)
@@ -131,7 +175,10 @@ const buildUserContent = async (message: LX.ChatMessage): Promise<ApiMessage['co
   return parts
 }
 
-const buildApiMessages = async (conversationId: string): Promise<ApiMessage[]> => {
+const buildApiMessages = async (
+  conversationId: string,
+  fileHandling: LX.FileHandlingMode
+): Promise<ApiMessage[]> => {
   const conv = conversationState.conversations.find((c) => c.id === conversationId)
   const systemPrompt = conv?.systemPrompt || settingState.setting['chat.systemPrompt']
   const history = conversationAction.getMessages(conversationId).filter((m) => m.role !== 'error')
@@ -142,7 +189,7 @@ const buildApiMessages = async (conversationId: string): Promise<ApiMessage[]> =
   }
   for (const m of history) {
     if (m.role === 'user') {
-      messages.push({ role: 'user', content: await buildUserContent(m) })
+      messages.push({ role: 'user', content: await buildUserContent(m, fileHandling) })
     } else if (m.role === 'assistant') {
       messages.push({ role: 'assistant', content: m.content })
     }
@@ -181,7 +228,12 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   let assistantRemoved = false
   let finalStatus: LX.ChatMessageStatus | undefined
   try {
-    const messages = await buildApiMessages(conv.id)
+    const station = stationAction.getForConversation(conv)
+    const fileHandling =
+      station?.endpointMode === 'responses' && station.fileHandling === 'direct_file'
+        ? 'direct_file'
+        : 'local_extract'
+    const messages = await buildApiMessages(conv.id, fileHandling)
     // 去掉刚插入的空 assistant，避免重复
     const apiMessages = messages.filter(
       (m, idx) => !(idx === messages.length - 1 && m.role === 'assistant' && !m.content)
@@ -196,8 +248,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       apiMessages,
       {
         onDelta: (delta) => {
-          if (typeof delta === 'string') full += delta
-          else full += String(delta ?? '')
+          full = appendStreamDelta(full, typeof delta === 'string' ? delta : String(delta ?? ''))
           // 流式过程只更新内存 + 节流 UI，避免每个 token 写盘/狂刷 setState
           void conversationAction.updateMessageContent(conv.id, assistant.id, full, false)
         },

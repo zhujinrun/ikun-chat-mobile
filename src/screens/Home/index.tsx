@@ -332,6 +332,10 @@ const Home = ({ componentId }: Props) => {
   const remainingFileSlots = Math.max(0, MAX_FILE_ATTACHMENTS - pendingFileAttachments.length)
   const remainingImageSlotsLabel =
     remainingImageSlots > 0 ? `还可添加 ${remainingImageSlots} 张` : '已达上限'
+  const fileUploadHint =
+    activeStation?.endpointMode === 'responses' && activeStation.fileHandling === 'direct_file'
+      ? '原文件随 Responses 请求发送'
+      : '本地解析优先发送'
   const isPendingImageTextOnly = hasPendingImage && currentVision === 'text'
   const needSetup = !activeStation?.baseUrl || !activeStation.apiKey
   const hasConvPrompt = !!(active?.systemPrompt && active.systemPrompt.trim())
@@ -2209,7 +2213,7 @@ const Home = ({ componentId }: Props) => {
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
               {remainingFileSlots > 0
-                ? `还可添加 ${remainingFileSlots} 个 · 单个 ≤ ${formatFileSize(MAX_FILE_BYTES)} · 可读内容随消息发送`
+                ? `还可添加 ${remainingFileSlots} 个 · 单个 ≤ ${formatFileSize(MAX_FILE_BYTES)} · ${fileUploadHint}`
                 : `已达 ${MAX_FILE_ATTACHMENTS} 个上限，可先移除一个`}
             </Text>
           </View>
