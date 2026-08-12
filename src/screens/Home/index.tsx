@@ -62,10 +62,6 @@ import {
   type VisionCapability,
 } from '@/utils/modelCapability'
 
-type Props = {
-  componentId: string
-}
-
 type EditTarget = {
   id: string
   content: string
@@ -203,7 +199,7 @@ const buildImageAttachment = async (asset: Asset): Promise<BuildImageAttachmentR
   }
 }
 
-const Home = ({ componentId }: Props) => {
+const Home = () => {
   const theme = useTheme()
   const conversations = useConversations()
   const activeId = useActiveConversationId()
@@ -415,11 +411,11 @@ const Home = ({ componentId }: Props) => {
   const ensureReady = useCallback(() => {
     if (needSetup) {
       toast('请先在设置中配置当前中转站')
-      void navigations.pushSettingScreen(componentId)
+      void navigations.pushSettingScreen()
       return false
     }
     return true
-  }, [needSetup, componentId])
+  }, [needSetup])
 
   const performScrollToEnd = useCallback((animated: boolean) => {
     const { contentHeight, layoutHeight } = messageListMetricsRef.current
@@ -1554,7 +1550,7 @@ const Home = ({ componentId }: Props) => {
           </Text>
           <TouchableOpacity
             style={styles.bannerActionRow}
-            onPress={() => void navigations.pushSettingScreen(componentId)}
+            onPress={() => void navigations.pushSettingScreen()}
             accessibilityLabel="去设置"
             accessibilityRole="button"
           >
@@ -1964,7 +1960,7 @@ const Home = ({ componentId }: Props) => {
                 ]}
                 onPress={() => {
                   setDrawerOpen(false)
-                  void navigations.pushSettingScreen(componentId)
+                  void navigations.pushSettingScreen()
                 }}
                 accessibilityLabel="打开设置"
                 accessibilityRole="button"

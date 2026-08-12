@@ -1,7 +1,5 @@
 # Add project specific ProGuard rules here.
 
--keep class com.reactnativenavigation.views.element.animators.** { *; }
-
 # React Native / Hermes
 -keep class com.facebook.react.** { *; }
 -keep class com.facebook.hermes.** { *; }

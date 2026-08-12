@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.9](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.8...v0.1.9) - 2026-08-12
+## [0.1.9](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.8...v0.1.9) - 2026-08-12
 
 ### 新增
 
@@ -21,7 +21,7 @@
 - 优化 Markdown 渲染稳定性，降低流式输出过程中的闪烁
 - 优化回复完成后的滚动行为，避免阅读历史消息时被拉回底部
 
-## [0.1.8](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.7...v0.1.8) - 2026-08-10
+## [0.1.8](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.7...v0.1.8) - 2026-08-10
 
 ### 新增
 
@@ -36,7 +36,7 @@
 - 默认中转站隐藏“设默认”和“删除”按钮
 - 缩小设置页操作按钮尺寸，优化中转站操作区布局
 
-## [0.1.7](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.6...v0.1.7) - 2026-08-10
+## [0.1.7](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.6...v0.1.7) - 2026-08-10
 
 ### 新增
 
@@ -56,7 +56,7 @@
 - 优化会话长按菜单顺序：重命名、置顶、清空消息、删除
 - 优化设置页主题选项、字号显示、关于版本号和保存按钮尺寸
 
-## [0.1.6](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.5...v0.1.6) - 2026-08-10
+## [0.1.6](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.5...v0.1.6) - 2026-08-10
 
 ### 新增
 
@@ -72,7 +72,7 @@
 - 统一消息复制、编辑、重试、重新生成等行内按钮与长按菜单逻辑
 - 统一图片复制、查看大图、删除等操作入口与无障碍标签
 
-## [0.1.5](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.4...v0.1.5) - 2026-08-09
+## [0.1.5](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.4...v0.1.5) - 2026-08-09
 
 ### 新增
 
@@ -91,7 +91,7 @@
 - 模型搜索支持命中高亮，并在携带图片切换模型时优先筛选视觉模型
 - 模型筛选数量随搜索结果联动，减少筛选反馈误差
 
-## [0.1.4](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.3...v0.1.4) - 2026-08-09
+## [0.1.4](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.3...v0.1.4) - 2026-08-09
 
 ### 修复
 
@@ -103,7 +103,7 @@
 - 压缩模型选择列表项间距，并增加底部留白
 - 设置页补充流式输出开关说明，切换时给出状态提示
 
-## [0.1.3](https://github.com/ikunshare/ikun-chat-mobile/compare/v0.1.2...v0.1.3) - 2026-08-09
+## [0.1.3](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.2...v0.1.3) - 2026-08-09
 
 ### 新增
 

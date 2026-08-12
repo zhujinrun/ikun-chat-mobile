@@ -7,6 +7,7 @@ import groovy.json.JsonSlurper
 
 react {
   /* Folders / bundling / hermes — defaults are fine */
+  autolinkLibrariesWithApp()
 }
 
 def enableSeparateBuildPerCPUArchitecture = true
@@ -170,14 +171,9 @@ gradle.taskGraph.whenReady { taskGraph ->
 
 dependencies {
   implementation("com.facebook.react:react-android")
-  // Flipper 仅 debug：release 使用 src/release 下的空实现，避免打入 libflipper 等调试库
-  debugImplementation("com.facebook.react:flipper-integration")
-
   if (hermesEnabled.toBoolean()) {
     implementation("com.facebook.react:hermes-android")
   } else {
     implementation jscFlavor
   }
 }
-
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)

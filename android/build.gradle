@@ -2,15 +2,13 @@
 
 buildscript {
   ext {
-    // 与本机已安装 platforms 对齐（当前 SDK 无 android-35）
     buildToolsVersion = "35.0.0"
-    minSdkVersion = 23
+    minSdkVersion = 24
     compileSdkVersion = 34
     targetSdkVersion = 29
 
-    // 若未安装对应 NDK，构建时再按报错用 sdkmanager 安装
     ndkVersion = "26.1.10909125"
-    kotlinVersion = "1.9.24"
+    kotlinVersion = "1.9.25"
     RNNKotlinVersion = kotlinVersion
   }
   repositories {

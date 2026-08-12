@@ -20,6 +20,7 @@ export type AppIconName =
   | 'chat'
   | 'model'
   | 'thinking'
+  | 'back'
   | 'chevron-down'
   | 'arrow-down'
   | 'warning'
@@ -50,6 +51,7 @@ const ICON_MAP: Record<AppIconName, string> = {
   chat: 'chatbubbles-outline',
   model: 'hardware-chip-outline',
   thinking: 'sync-outline',
+  back: 'chevron-back',
   'chevron-down': 'chevron-down',
   'arrow-down': 'arrow-down',
   warning: 'warning-outline',

@@ -59,10 +59,6 @@ const endpointModeLabel = (mode?: LX.ApiEndpointMode) =>
 const fileHandlingLabel = (mode?: LX.FileHandlingMode) =>
   mode === 'direct_file' ? '原文件直传' : '本地解析优先'
 
-type Props = {
-  componentId: string
-}
-
 const validateExtraHeaders = (raw: string) => {
   const text = raw.trim()
   if (!text) return null
@@ -81,7 +77,7 @@ const validateExtraHeaders = (raw: string) => {
   }
 }
 
-const Setting = (_props: Props) => {
+const Setting = () => {
   const theme = useTheme()
   const setting = useSetting()
   const { stations, defaultId } = useStations()

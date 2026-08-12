@@ -25,7 +25,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ikunshare/ikun-chat-mobile.git"
+    "url": "git+https://github.com/zhujinrun/ikun-chat-mobile.git"
   },
   "keywords": [
     "chat-agent",
@@ -33,36 +33,39 @@
     "react-native-app"
   ],
   "author": {
-    "name": "ikunshare"
+    "name": "zhujinrun"
   },
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/ikunshare/ikun-chat-mobile/issues"
+    "url": "https://github.com/zhujinrun/ikun-chat-mobile/issues"
   },
-  "homepage": "https://github.com/ikunshare/ikun-chat-mobile#readme",
+  "homepage": "https://github.com/zhujinrun/ikun-chat-mobile#readme",
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@react-native-vector-icons/ionicons": "^12.5.0",
+    "@react-navigation/native": "^7.3.16",
+    "@react-navigation/native-stack": "^7.18.8",
     "markdown-it": "10.0.0",
-    "react": "18.2.0",
-    "react-native": "0.73.11",
+    "react": "18.3.1",
+    "react-native": "0.76.9",
     "react-native-exception-handler": "^2.10.10",
     "react-native-image-picker": "^7.1.2",
     "react-native-markdown-display": "7.0.2",
-    "react-native-navigation": "7.39.2"
+    "react-native-safe-area-context": "^5.6.2",
+    "react-native-screens": "^4.10.0"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",
     "@babel/plugin-proposal-export-namespace-from": "^7.18.9",
     "@babel/preset-env": "^7.28.3",
     "@babel/runtime": "^7.28.4",
-    "@react-native/babel-preset": "^0.74.89",
-    "@react-native/metro-config": "^0.74.89",
-    "@react-native/typescript-config": "^0.74.89",
+    "@react-native-community/cli": "15.1.3",
+    "@react-native/babel-preset": "0.76.9",
+    "@react-native/metro-config": "0.76.9",
+    "@react-native/typescript-config": "0.76.9",
     "@tsconfig/react-native": "^3.0.7",
-    "@types/react": "^18.3.24",
-    "@types/react-native": "^0.72.8",
+    "@types/react": "18.3.12",
     "babel-plugin-module-resolver": "^5.0.2",
     "chalk": "^4.1.2",
     "changelog-parser": "^3.0.1",

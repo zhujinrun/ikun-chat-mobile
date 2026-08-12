@@ -18,8 +18,8 @@
 
 ## 技术栈
 
-- React Native 0.73
-- react-native-navigation
+- React Native 0.76
+- React Navigation
 - AsyncStorage
 - GitHub Actions 自动打包（对齐 [ikun-music-mobile](https://github.com/ikunshare/ikun-music-mobile) 流程）
 

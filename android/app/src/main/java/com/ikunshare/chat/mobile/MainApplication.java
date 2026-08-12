@@ -1,22 +1,28 @@
 package com.ikunshare.chat.mobile;
 
+import android.app.Application;
+
 import com.facebook.react.PackageList;
-import com.facebook.react.flipper.ReactNativeFlipper;
-import com.reactnativenavigation.NavigationApplication;
+import com.facebook.react.ReactApplication;
+import com.facebook.react.ReactHost;
 import com.facebook.react.ReactNativeHost;
 import com.facebook.react.ReactPackage;
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
-import com.reactnativenavigation.react.NavigationReactNativeHost;
+import com.facebook.react.defaults.DefaultReactHost;
+import com.facebook.react.defaults.DefaultReactNativeHost;
+import com.facebook.react.soloader.OpenSourceMergedSoMapping;
+import com.facebook.soloader.SoLoader;
 
+import java.io.IOException;
 import java.util.List;
 
 import com.ikunshare.chat.mobile.utils.CrashReporter;
 import com.ikunshare.chat.mobile.utils.UtilsPackage;
 
-public class MainApplication extends NavigationApplication {
+public class MainApplication extends Application implements ReactApplication {
 
   private final ReactNativeHost mReactNativeHost =
-    new NavigationReactNativeHost(this) {
+    new DefaultReactNativeHost(this) {
       @Override
       public boolean getUseDeveloperSupport() {
         return BuildConfig.DEBUG;
@@ -51,17 +57,23 @@ public class MainApplication extends NavigationApplication {
   }
 
   @Override
+  public ReactHost getReactHost() {
+    return DefaultReactHost.getDefaultReactHost(getApplicationContext(), mReactNativeHost);
+  }
+
+  @Override
   public void onCreate() {
     // 尽早安装，捕获后续初始化阶段的 Java 未捕获异常
     CrashReporter.install(this);
     super.onCreate();
+    try {
+      SoLoader.init(this, OpenSourceMergedSoMapping.INSTANCE);
+    } catch (IOException e) {
+      throw new RuntimeException("SoLoader 初始化失败", e);
+    }
 
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       DefaultNewArchitectureEntryPoint.load();
-    }
-    // debug：真实 Flipper；release：空实现（见 src/release/.../ReactNativeFlipper.java）
-    if (BuildConfig.DEBUG) {
-      ReactNativeFlipper.initializeFlipper(this, getReactNativeHost().getReactInstanceManager());
     }
   }
 }
