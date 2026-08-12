@@ -152,34 +152,34 @@ function createRenderRules(copyIconColor: string): Record<string, RenderRule> {
       </View>
     ),
     heading1: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_heading1}>
+      <Text key={node.key} style={styles.heading1} selectable>
         {children}
-      </View>
+      </Text>
     ),
     heading2: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_heading2}>
+      <Text key={node.key} style={styles.heading2} selectable>
         {children}
-      </View>
+      </Text>
     ),
     heading3: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_heading3}>
+      <Text key={node.key} style={styles.heading3} selectable>
         {children}
-      </View>
+      </Text>
     ),
     heading4: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_heading4}>
+      <Text key={node.key} style={styles.heading4} selectable>
         {children}
-      </View>
+      </Text>
     ),
     heading5: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_heading5}>
+      <Text key={node.key} style={styles.heading5} selectable>
         {children}
-      </View>
+      </Text>
     ),
     heading6: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_heading6}>
+      <Text key={node.key} style={styles.heading6} selectable>
         {children}
-      </View>
+      </Text>
     ),
     hr: (node, _children, _parent, styles) => (
       <View key={node.key} style={styles._VIEW_SAFE_hr} />
@@ -363,15 +363,25 @@ function createRenderRules(copyIconColor: string): Record<string, RenderRule> {
       </Text>
     ),
     textgroup: (node, children, _parent, styles) => (
-      <Text key={node.key} style={styles.textgroup} selectable>
+      <Text key={node.key} style={styles.textgroup}>
         {children}
       </Text>
     ),
-    paragraph: (node, children, _parent, styles) => (
-      <View key={node.key} style={styles._VIEW_SAFE_paragraph}>
-        {children}
-      </View>
-    ),
+    paragraph: (node, children, _parent, styles) => {
+      if (hasDescendantType(node, 'image')) {
+        return (
+          <View key={node.key} style={styles._VIEW_SAFE_paragraph}>
+            {children}
+          </View>
+        )
+      }
+
+      return (
+        <Text key={node.key} style={styles.paragraphText} selectable>
+          {children}
+        </Text>
+      )
+    },
     hardbreak: (node, _children, _parent, styles) => (
       <Text key={node.key} style={styles.hardbreak}>
         {'\n'}
@@ -449,6 +459,13 @@ function createMarkdownStyles({
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'flex-start',
+    },
+    paragraphText: {
+      color,
+      fontSize,
+      lineHeight,
+      marginTop: 0,
+      marginBottom: 6,
     },
     heading1: {
       color,
@@ -750,6 +767,10 @@ function renderCodeBlock(
 
 function hasParent(parentNodes: ASTNode[], type: string): boolean {
   return parentNodes.some((node) => node.type === type)
+}
+
+function hasDescendantType(node: ASTNode, type: string): boolean {
+  return node.children?.some((child) => child.type === type || hasDescendantType(child, type)) || false
 }
 
 function trimTrailingNewline(value: string): string {

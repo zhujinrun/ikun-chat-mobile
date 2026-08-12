@@ -81,7 +81,6 @@ type MessageActionItem = {
   key: string
   icon: AppIconName
   label: string
-  menuLabel?: string
   description: string
   onPress: () => void
   accessibilityLabel?: string
@@ -113,13 +112,6 @@ const MODEL_CAPABILITY_FILTERS: Array<{ key: ModelCapabilityFilter; label: strin
   { key: 'text', label: '仅文本' },
   { key: 'unknown', label: '未知' },
 ]
-
-const MARKDOWN_TABLE_RE =
-  /(^|\n)\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*(\n|$)/
-const MARKDOWN_CODE_BLOCK_RE = /(^|\n)\s*(```|~~~)[\s\S]*?(\n\2|$)/
-
-const hasMarkdownTable = (text: string) => MARKDOWN_TABLE_RE.test(text || '')
-const hasMarkdownCodeBlock = (text: string) => MARKDOWN_CODE_BLOCK_RE.test(text || '')
 
 type BuildImageAttachmentResult =
   | { attachment: LX.ChatAttachment }
@@ -241,7 +233,6 @@ const Home = ({ componentId }: Props) => {
   const [renameText, setRenameText] = useState('')
   const [conversationActionTarget, setConversationActionTarget] =
     useState<LX.Conversation | null>(null)
-  const [messageActionTarget, setMessageActionTarget] = useState<LX.ChatMessage | null>(null)
   const [imageActionTarget, setImageActionTarget] = useState<ImageActionTarget | null>(null)
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
@@ -1044,14 +1035,11 @@ const Home = ({ componentId }: Props) => {
   }, [messages, active, defaultModel])
 
   const buildMessageActions = useCallback(
-    (item: LX.ChatMessage, options?: { closeMenu?: boolean }): MessageActionItem[] => {
+    (item: LX.ChatMessage): MessageActionItem[] => {
       const isLast = item.id === lastMessageId
       const status = getMessageStatus(item, streaming && item.id === streamingMessageId)
       if (status === 'streaming') return []
 
-      const closeMenu = () => {
-        if (options?.closeMenu) setMessageActionTarget(null)
-      }
       const actions: MessageActionItem[] = []
 
       if (item.content) {
@@ -1063,7 +1051,6 @@ const Home = ({ componentId }: Props) => {
           muted: true,
           accessibilityLabel: '复制消息',
           onPress: () => {
-            closeMenu()
             handleCopy(item.content)
           },
         })
@@ -1074,11 +1061,9 @@ const Home = ({ componentId }: Props) => {
           key: 'edit',
           icon: 'edit',
           label: '编辑',
-          menuLabel: '编辑并重发',
           description: '修改这条消息，并重新请求后续回复',
           accessibilityLabel: '编辑并重发',
           onPress: () => {
-            closeMenu()
             openEditMessage(item)
           },
         })
@@ -1093,7 +1078,6 @@ const Home = ({ componentId }: Props) => {
           description: '使用上一条用户消息重新请求',
           accessibilityLabel: '重试生成',
           onPress: () => {
-            closeMenu()
             void handleRetry()
           },
         })
@@ -1104,7 +1088,6 @@ const Home = ({ componentId }: Props) => {
           description: '先调整上一条用户消息，再重新生成',
           accessibilityLabel: '编辑上一条用户消息后重试',
           onPress: () => {
-            closeMenu()
             openLastUserForRetryEdit()
           },
         })
@@ -1118,7 +1101,6 @@ const Home = ({ componentId }: Props) => {
           description: '基于上一条用户消息再次请求回复',
           accessibilityLabel: '重新生成助手回复',
           onPress: () => {
-            closeMenu()
             void handleRegenerate()
           },
         })
@@ -1137,14 +1119,6 @@ const Home = ({ componentId }: Props) => {
       streaming,
       streamingMessageId,
     ]
-  )
-
-  const handleMessageLongPress = useCallback(
-    (item: LX.ChatMessage) => {
-      if (streaming) return
-      if (buildMessageActions(item).length) setMessageActionTarget(item)
-    },
-    [streaming, buildMessageActions]
   )
 
   const renderMessage = useCallback(
@@ -1284,9 +1258,6 @@ const Home = ({ componentId }: Props) => {
             : messageStatus === 'failed'
               ? renderStatePill('status-failed', 'warning', '生成失败', 'danger')
               : null
-      const disableMessageLongPress =
-        isAssistant && (hasMarkdownTable(item.content) || hasMarkdownCodeBlock(item.content))
-
       return (
         <View
           style={[
@@ -1295,21 +1266,17 @@ const Home = ({ componentId }: Props) => {
             isAssistant ? styles.assistantWrap : null,
           ]}
         >
-          <Pressable
-            disabled={disableMessageLongPress}
-            onLongPress={() => handleMessageLongPress(item)}
+          <View
+            style={[
+              styles.bubble,
+              isAssistant ? styles.assistantBubbleFlat : null,
+              {
+                backgroundColor: bubbleBg,
+                borderColor: isAssistant ? 'transparent' : colors.border,
+                borderWidth: isAssistant || isUser ? 0 : StyleSheet.hairlineWidth,
+              },
+            ]}
           >
-            <View
-              style={[
-                styles.bubble,
-                isAssistant ? styles.assistantBubbleFlat : null,
-                {
-                  backgroundColor: bubbleBg,
-                  borderColor: isAssistant ? 'transparent' : colors.border,
-                  borderWidth: isAssistant || isUser ? 0 : StyleSheet.hairlineWidth,
-                },
-              ]}
-            >
               {!item.content && !imageAttachments.length && !fileAttachments.length ? (
                 isStreamingThis ? (
                   <ThinkingIndicator color={textColor} size={Math.max(16, fontSize)} />
@@ -1427,8 +1394,7 @@ const Home = ({ componentId }: Props) => {
                   textColor={textColor}
                 />
               )}
-            </View>
-          </Pressable>
+          </View>
 
           {showActions ? (
             <View style={[styles.msgActions, isUser && styles.msgActionsRight]}>
@@ -1461,7 +1427,6 @@ const Home = ({ componentId }: Props) => {
       fontSize,
       buildMessageActions,
       handleExport,
-      handleMessageLongPress,
       handleStop,
       openImagePreview,
       handleImageLongPress,
@@ -1481,22 +1446,6 @@ const Home = ({ componentId }: Props) => {
     : isPendingImageTextOnly
       ? colors.error
       : colors.primary
-  const messageActionStatus = messageActionTarget
-    ? getMessageStatus(
-        messageActionTarget,
-        streaming && messageActionTarget.id === streamingMessageId
-      )
-    : undefined
-  const messageActionFailed = messageActionStatus === 'failed'
-  const messageActionTitle =
-    messageActionTarget?.role === 'user'
-      ? '用户消息'
-      : messageActionFailed
-        ? '失败消息'
-        : '助手消息'
-  const messageMenuActions = messageActionTarget
-    ? buildMessageActions(messageActionTarget, { closeMenu: true })
-    : []
   const imageActionCanDelete = imageActionTarget?.message.role === 'user' && !!activeId
   const imageActionTitle = imageActionTarget?.attachment.name || '图片'
   const renderMenuAction = (
@@ -1534,13 +1483,19 @@ const Home = ({ componentId }: Props) => {
   return (
     <SafeAreaView
       style={[styles.root, { backgroundColor: colors.background }]}
-      {...openDrawerPanResponder.panHandlers}
     >
       <StatusBar
         barStyle={theme.isDark ? 'light-content' : 'dark-content'}
         backgroundColor="transparent"
         translucent
       />
+      {!drawerOpen ? (
+        <View
+          style={styles.drawerSwipeEdge}
+          pointerEvents="box-only"
+          {...openDrawerPanResponder.panHandlers}
+        />
+      ) : null}
 
       <View
         style={[
@@ -1862,29 +1817,6 @@ const Home = ({ componentId }: Props) => {
           )}
         </View>
       </KeyboardAvoidingView>
-
-      <AppModal
-        visible={!!messageActionTarget}
-        title={messageActionTitle}
-        placement="bottom"
-        animationType="fade"
-        onClose={() => setMessageActionTarget(null)}
-      >
-        {messageActionTarget ? (
-          <>
-            {messageMenuActions.map((action) =>
-              renderMenuAction(
-                action.key,
-                action.icon,
-                action.menuLabel || action.label,
-                action.description,
-                action.onPress,
-                action.accessibilityLabel
-              )
-            )}
-          </>
-        ) : null}
-      </AppModal>
 
       <AppModal
         visible={!!imageActionTarget}
@@ -2665,6 +2597,14 @@ Home.options = {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  drawerSwipeEdge: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: DRAWER_SWIPE_EDGE_WIDTH,
+    zIndex: 20,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
