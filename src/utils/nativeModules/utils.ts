@@ -114,6 +114,20 @@ export const deleteLocalFiles = async (uris: (string | undefined)[]): Promise<vo
   }
 }
 
+/** AI 持续输出等前台长任务期间保持屏幕常亮，结束后恢复系统息屏策略。 */
+export const setKeepScreenOn = async (enabled: boolean): Promise<void> => {
+  if (Platform.OS !== 'android') return
+  try {
+    if (enabled) {
+      if (UtilsModule?.screenkeepAwake) await UtilsModule.screenkeepAwake()
+    } else if (UtilsModule?.screenUnkeepAwake) {
+      await UtilsModule.screenUnkeepAwake()
+    }
+  } catch {
+    // 保持屏幕常亮是体验优化，失败不阻断聊天流程。
+  }
+}
+
 export const exitApp = () => {
   if (UtilsModule?.exitApp) UtilsModule.exitApp()
 }

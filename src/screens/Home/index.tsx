@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -52,6 +52,7 @@ import {
   cacheImageTo,
   deleteLocalFiles,
   pickFiles,
+  setKeepScreenOn,
 } from '@/utils/nativeModules/utils'
 import { markMediaPickerOpened, markMediaPickerSettled } from '@/utils/appResumeRepair'
 import {
@@ -217,6 +218,13 @@ const Home = ({ componentId }: Props) => {
   const { stations, defaultId } = useStations()
   const fontSize = useSettingValue('common.fontSize')
   const globalSystemPrompt = useSettingValue('chat.systemPrompt')
+
+  useEffect(() => {
+    void setKeepScreenOn(streaming)
+    return () => {
+      if (streaming) void setKeepScreenOn(false)
+    }
+  }, [streaming])
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [conversationQuery, setConversationQuery] = useState('')
