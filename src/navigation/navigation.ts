@@ -19,6 +19,14 @@ export async function pushHomeScreen() {
   )
 }
 
+export async function repairHomeScreenAfterResume() {
+  if (!navigationRef.isReady()) return
+  const currentRoute = navigationRef.getCurrentRoute()?.name
+  if (currentRoute && currentRoute !== HOME_SCREEN) return
+
+  await pushHomeScreen()
+}
+
 export async function pushSettingScreen() {
   if (!navigationRef.isReady()) return
   if (navigationRef.getCurrentRoute()?.name === SETTING_SCREEN) return

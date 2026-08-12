@@ -64,7 +64,7 @@ const AppContent = () => {
       if (!shouldRepairNavigationOnAppStateChange(prevState, nextState)) return
 
       setTimeout(() => {
-        void navigations.pushHomeScreen().catch((err) => {
+        void navigations.repairHomeScreenAfterResume().catch((err) => {
           console.warn('[app] resume repair failed', err)
         })
       }, 120)

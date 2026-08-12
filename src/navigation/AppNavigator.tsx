@@ -6,10 +6,9 @@ import {
   NavigationContainer,
 } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { enableScreens } from 'react-native-screens'
-import IconButton from '@/components/common/IconButton'
+import ScreenHeader from '@/components/common/ScreenHeader'
 import Home from '@/screens/Home'
 import Setting from '@/screens/Setting'
 import { useTheme } from '@/store/theme/hook'
@@ -20,55 +19,6 @@ import type { RootStackParamList } from './types'
 enableScreens(true)
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
-
-type SettingHeaderProps = {
-  colors: {
-    surface: string
-    border: string
-    text: string
-  }
-  isDark: boolean
-  onBack: () => void
-}
-
-const SettingHeader = ({ colors, isDark, onBack }: SettingHeaderProps) => {
-  const insets = useSafeAreaInsets()
-  const topInset = Platform.OS === 'android' ? StatusBar.currentHeight || insets.top : insets.top
-
-  return (
-    <View
-      style={[
-        styles.settingHeader,
-        {
-          paddingTop: topInset,
-          backgroundColor: colors.surface,
-          borderBottomColor: colors.border,
-        },
-      ]}
-    >
-      <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor="transparent"
-        translucent
-      />
-      <View style={styles.settingHeaderInner}>
-        <IconButton
-          name="back"
-          accessibilityLabel="返回"
-          color={colors.text}
-          size={24}
-          hitSlop={12}
-          style={styles.settingBackButton}
-          onPress={onBack}
-        />
-        <Text style={[styles.settingTitle, { color: colors.text }]} numberOfLines={1}>
-          设置
-        </Text>
-        <View style={styles.settingHeaderSpacer} />
-      </View>
-    </View>
-  )
-}
 
 const AppNavigator = () => {
   const theme = useTheme()
@@ -115,9 +65,8 @@ const AppNavigator = () => {
             component={Setting}
             options={({ navigation }) => ({
               header: () => (
-                <SettingHeader
-                  colors={colors}
-                  isDark={theme.isDark}
+                <ScreenHeader
+                  title="设置"
                   onBack={() => {
                     if (navigation.canGoBack()) {
                       navigation.goBack()
@@ -146,34 +95,5 @@ const AppNavigator = () => {
     </SafeAreaProvider>
   )
 }
-
-const styles = StyleSheet.create({
-  settingHeader: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 8,
-    paddingBottom: 6,
-  },
-  settingHeaderInner: {
-    height: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingBackButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingTitle: {
-    flex: 1,
-    marginLeft: 2,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  settingHeaderSpacer: {
-    width: 40,
-  },
-})
 
 export default AppNavigator
