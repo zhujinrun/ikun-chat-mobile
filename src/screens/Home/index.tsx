@@ -17,6 +17,7 @@ import {
   Platform,
   Share,
   Image,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
@@ -102,6 +103,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const DRAWER_SWIPE_EDGE_WIDTH = 10
 const DRAWER_SWIPE_DISTANCE = 56
 const MESSAGE_AUTO_SCROLL_THRESHOLD = 96
+const MESSAGE_SCROLL_TO_BOTTOM_BUTTON_THRESHOLD = 360
 const IMAGE_PICKER_MAX_EDGE = 1600
 const IMAGE_PICKER_QUALITY = 0.8 as const
 
@@ -251,9 +253,25 @@ const Home = ({ componentId }: Props) => {
   const [previewImage, setPreviewImage] = useState<LX.ChatAttachment | null>(null)
   /** 编辑重发：待发送的原消息附件（可逐个移除） */
   const [editAttachments, setEditAttachments] = useState<LX.ChatAttachment[]>([])
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const listRef = useRef<FlatList>(null)
   const shouldFollowMessageEndRef = useRef(true)
   const isMessageListDraggingRef = useRef(false)
+  const scrollToEndTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  const messageListMetricsRef = useRef({ contentHeight: 0, layoutHeight: 0 })
+
+  useEffect(() => {
+    shouldFollowMessageEndRef.current = true
+    setShowScrollToBottom(false)
+  }, [activeId])
+
+  useEffect(
+    () => () => {
+      scrollToEndTimersRef.current.forEach(clearTimeout)
+      scrollToEndTimersRef.current = []
+    },
+    []
+  )
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) || null,
@@ -410,20 +428,68 @@ const Home = ({ componentId }: Props) => {
     return true
   }, [needSetup, componentId])
 
+  const performScrollToEnd = useCallback((animated: boolean) => {
+    const { contentHeight, layoutHeight } = messageListMetricsRef.current
+    if (contentHeight > 0 && layoutHeight > 0) {
+      // FlatList.scrollToEnd 对动态高度 item 容易停早；给一个超过底部的 offset，
+      // 交给原生 ScrollView clamp 到真实最大滚动位置。
+      const offset = Math.max(0, contentHeight + layoutHeight)
+      listRef.current?.scrollToOffset({ offset, animated })
+      return
+    }
+    listRef.current?.scrollToEnd({ animated })
+  }, [])
+
   const scrollToEnd = useCallback(() => {
     shouldFollowMessageEndRef.current = true
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
+    setShowScrollToBottom(false)
+    scrollToEndTimersRef.current.forEach(clearTimeout)
+    scrollToEndTimersRef.current = []
+
+    performScrollToEnd(true)
+    requestAnimationFrame(() => performScrollToEnd(false))
+    scrollToEndTimersRef.current = [80, 180, 360].map((delay) =>
+      setTimeout(() => performScrollToEnd(false), delay)
+    )
+  }, [performScrollToEnd])
+
+  const updateScrollToBottomButton = useCallback((distanceFromBottom: number) => {
+    const shouldShow =
+      distanceFromBottom > MESSAGE_SCROLL_TO_BOTTOM_BUTTON_THRESHOLD
+    setShowScrollToBottom((visible) => (visible === shouldShow ? visible : shouldShow))
   }, [])
+
+  const handleMessageListLayout = useCallback((event: LayoutChangeEvent) => {
+    messageListMetricsRef.current.layoutHeight = event.nativeEvent.layout.height
+  }, [])
+
+  const handleMessageListContentSizeChange = useCallback(
+    (_width: number, height: number) => {
+      messageListMetricsRef.current.contentHeight = height
+      if (shouldFollowMessageEndRef.current) {
+        // 只在用户本来贴近底部时跟随新内容，避免阅读历史时被拉回最新消息。
+        performScrollToEnd(!streaming)
+      }
+    },
+    [performScrollToEnd, streaming]
+  )
 
   const handleMessageListScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!isMessageListDraggingRef.current) return
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-      const distanceFromBottom =
+      messageListMetricsRef.current = {
+        contentHeight: contentSize.height,
+        layoutHeight: layoutMeasurement.height,
+      }
+      const distanceFromBottom = Math.max(
+        0,
         contentSize.height - layoutMeasurement.height - contentOffset.y
+      )
+      updateScrollToBottomButton(distanceFromBottom)
+      if (!isMessageListDraggingRef.current) return
       shouldFollowMessageEndRef.current = distanceFromBottom <= MESSAGE_AUTO_SCROLL_THRESHOLD
     },
-    []
+    [updateScrollToBottomButton]
   )
 
   const handleMessageListScrollBeginDrag = useCallback(() => {
@@ -433,22 +499,28 @@ const Home = ({ componentId }: Props) => {
   const handleMessageListScrollEndDrag = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-      const distanceFromBottom =
+      const distanceFromBottom = Math.max(
+        0,
         contentSize.height - layoutMeasurement.height - contentOffset.y
+      )
+      updateScrollToBottomButton(distanceFromBottom)
       shouldFollowMessageEndRef.current = distanceFromBottom <= MESSAGE_AUTO_SCROLL_THRESHOLD
       isMessageListDraggingRef.current = false
     },
-    []
+    [updateScrollToBottomButton]
   )
 
   const handleMessageListMomentumScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-      const distanceFromBottom =
+      const distanceFromBottom = Math.max(
+        0,
         contentSize.height - layoutMeasurement.height - contentOffset.y
+      )
+      updateScrollToBottomButton(distanceFromBottom)
       shouldFollowMessageEndRef.current = distanceFromBottom <= MESSAGE_AUTO_SCROLL_THRESHOLD
     },
-    []
+    [updateScrollToBottomButton]
   )
 
   const markImageBroken = useCallback((uri?: string) => {
@@ -1533,49 +1605,61 @@ const Home = ({ componentId }: Props) => {
         </View>
       ) : null}
 
-      <FlatList
-        ref={listRef}
-        data={Array.isArray(messages) ? messages : []}
-        keyExtractor={(item, index) => item?.id || `msg_${index}`}
-        renderItem={renderMessage}
-        nestedScrollEnabled
-        contentContainerStyle={styles.listContent}
-        onScroll={handleMessageListScroll}
-        onScrollBeginDrag={handleMessageListScrollBeginDrag}
-        onScrollEndDrag={handleMessageListScrollEndDrag}
-        onMomentumScrollEnd={handleMessageListMomentumScrollEnd}
-        scrollEventThrottle={16}
-        onContentSizeChange={() => {
-          if (shouldFollowMessageEndRef.current) {
-            // 只在用户本来贴近底部时跟随新内容，避免阅读历史时被拉回最新消息。
-            listRef.current?.scrollToEnd({ animated: !streaming })
-          }
-        }}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={[styles.emptyBrand, { color: colors.primary }]}>IKUN Chat</Text>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>今天想聊点什么？</Text>
-            <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              聚焦输入，支持 Markdown、图片/文件附件、编辑重发与重新生成。
-            </Text>
-            <TouchableOpacity
-              style={[
-                styles.emptyModelPill,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-              onPress={() => openModelPicker()}
-              accessibilityLabel="选择模型"
-              accessibilityRole="button"
-            >
-              <Icon name="model" size={14} color={colors.primary} />
-              <Text style={[styles.emptyModelText, { color: colors.text }]} numberOfLines={1}>
-                {currentStationName} · {currentModel}
+      <View style={styles.messageListArea}>
+        <FlatList
+          ref={listRef}
+          data={Array.isArray(messages) ? messages : []}
+          keyExtractor={(item, index) => item?.id || `msg_${index}`}
+          renderItem={renderMessage}
+          nestedScrollEnabled
+          style={styles.messageList}
+          contentContainerStyle={styles.listContent}
+          onLayout={handleMessageListLayout}
+          onScroll={handleMessageListScroll}
+          onScrollBeginDrag={handleMessageListScrollBeginDrag}
+          onScrollEndDrag={handleMessageListScrollEndDrag}
+          onMomentumScrollEnd={handleMessageListMomentumScrollEnd}
+          scrollEventThrottle={16}
+          onContentSizeChange={handleMessageListContentSizeChange}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={[styles.emptyBrand, { color: colors.primary }]}>IKUN Chat</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>今天想聊点什么？</Text>
+              <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
+                聚焦输入，支持 Markdown、图片/文件附件、编辑重发与重新生成。
               </Text>
-              <Icon name="chevron-down" size={14} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        }
-      />
+              <TouchableOpacity
+                style={[
+                  styles.emptyModelPill,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+                onPress={() => openModelPicker()}
+                accessibilityLabel="选择模型"
+                accessibilityRole="button"
+              >
+                <Icon name="model" size={14} color={colors.primary} />
+                <Text style={[styles.emptyModelText, { color: colors.text }]} numberOfLines={1}>
+                  {currentStationName} · {currentModel}
+                </Text>
+                <Icon name="chevron-down" size={14} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          }
+        />
+        {showScrollToBottom ? (
+          <IconButton
+            name="arrow-down"
+            accessibilityLabel="回到底部"
+            color={colors.primary}
+            size={20}
+            style={[
+              styles.scrollToBottomButton,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            onPress={scrollToEnd}
+          />
+        ) : null}
+      </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -2625,7 +2709,25 @@ const styles = StyleSheet.create({
   bannerText: { color: '#92400E', flex: 1, fontSize: 13 },
   bannerActionRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 8 },
   bannerAction: { color: '#B45309', fontWeight: '700' },
+  messageListArea: { flex: 1 },
+  messageList: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, flexGrow: 1 },
+  scrollToBottomButton: {
+    position: 'absolute',
+    right: 18,
+    bottom: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 4,
+  },
   bubbleWrap: { marginVertical: 6, maxWidth: '86%' },
   bubbleLeft: { alignSelf: 'flex-start' },
   bubbleRight: { alignSelf: 'flex-end' },

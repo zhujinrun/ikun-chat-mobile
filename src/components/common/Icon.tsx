@@ -21,6 +21,7 @@ export type AppIconName =
   | 'model'
   | 'thinking'
   | 'chevron-down'
+  | 'arrow-down'
   | 'warning'
   | 'pin'
   | 'search'
@@ -50,6 +51,7 @@ const ICON_MAP: Record<AppIconName, string> = {
   model: 'hardware-chip-outline',
   thinking: 'sync-outline',
   'chevron-down': 'chevron-down',
+  'arrow-down': 'arrow-down',
   warning: 'warning-outline',
   pin: 'pin-outline',
   search: 'search-outline',
