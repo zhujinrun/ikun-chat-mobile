@@ -229,7 +229,6 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     File file = new File(filePath);
     if (!file.exists()) {
       Log.e("Utils", "installApk: file doe snot exist '" + filePath + "'");
-      // FIXME this should take a promise and fail it
       promise.reject("Utils", "installApk: file doe snot exist '" + filePath + "'");
       return;
     }
@@ -240,11 +239,9 @@ public class UtilsModule extends ReactContextBaseJavaModule {
       try {
         contentUri = FileProvider.getUriForFile(getReactApplicationContext(), fileProviderAuthority, file);
       } catch (Exception e) {
-        // FIXME should be a Promise.reject really
         Log.e("Utils", "installApk exception with authority name '" + fileProviderAuthority + "'", e);
         promise.reject("Utils", "installApk exception with authority name '" + fileProviderAuthority + "'");
         return;
-        // throw e;
       }
       Intent installApp = new Intent(Intent.ACTION_INSTALL_PACKAGE);
       installApp.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -492,26 +489,25 @@ public class UtilsModule extends ReactContextBaseJavaModule {
         dir,
         "file_" + System.currentTimeMillis() + "_" + (int) (Math.random() * 100000) + "_" + safeName
       );
-      InputStream input = reactContext.getContentResolver().openInputStream(uri);
-      if (input == null) throw new Exception("无法读取文件");
-      FileOutputStream output = new FileOutputStream(outFile);
       byte[] chunk = new byte[8192];
       long total = 0;
-      int read;
-      while ((read = input.read(chunk)) != -1) {
-        total += read;
-        if (total > maxBytes) {
-          input.close();
-          output.close();
-          if (outFile.exists()) outFile.delete();
-          skipped.pushMap(buildSkippedFile(name, total, "tooLarge"));
-          return;
+      try (
+        InputStream input = reactContext.getContentResolver().openInputStream(uri);
+        FileOutputStream output = new FileOutputStream(outFile)
+      ) {
+        if (input == null) throw new Exception("无法读取文件");
+        int read;
+        while ((read = input.read(chunk)) != -1) {
+          total += read;
+          if (total > maxBytes) {
+            if (outFile.exists()) outFile.delete();
+            skipped.pushMap(buildSkippedFile(name, total, "tooLarge"));
+            return;
+          }
+          output.write(chunk, 0, read);
         }
-        output.write(chunk, 0, read);
+        output.flush();
       }
-      input.close();
-      output.flush();
-      output.close();
 
       WritableMap file = Arguments.createMap();
       file.putString("uri", "file://" + outFile.getAbsolutePath());
@@ -675,7 +671,7 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     if ("data".equalsIgnoreCase(scheme)) {
       String whole = uri.toString();
       int comma = whole.indexOf(',');
-      if (comma < 0) throw new Exception("无法读取图片数据");
+      if (comma < 0) throw new Exception("无法读取文件数据");
       String meta = whole.substring(5, comma);
       String body = whole.substring(comma + 1);
       byte[] data;
@@ -687,22 +683,23 @@ public class UtilsModule extends ReactContextBaseJavaModule {
       if (data.length > maxBytes) throw new Exception("文件超过大小限制");
       return data;
     }
-    InputStream input = reactContext.getContentResolver().openInputStream(uri);
-    if (input == null) throw new Exception("无法读取文件地址");
-    ByteArrayOutputStream buf = new ByteArrayOutputStream();
-    byte[] chunk = new byte[8192];
-    int read;
-    long total = 0;
-    while ((read = input.read(chunk)) != -1) {
-      total += read;
-      if (total > maxBytes) {
-        input.close();
-        throw new Exception("文件超过大小限制");
+    try (
+      InputStream input = reactContext.getContentResolver().openInputStream(uri);
+      ByteArrayOutputStream buf = new ByteArrayOutputStream()
+    ) {
+      if (input == null) throw new Exception("无法读取文件地址");
+      byte[] chunk = new byte[8192];
+      int read;
+      long total = 0;
+      while ((read = input.read(chunk)) != -1) {
+        total += read;
+        if (total > maxBytes) {
+          throw new Exception("文件超过大小限制");
+        }
+        buf.write(chunk, 0, read);
       }
-      buf.write(chunk, 0, read);
+      return buf.toByteArray();
     }
-    input.close();
-    return buf.toByteArray();
   }
 
   private WritableMap buildSkippedFile(String name, long size, String reason) {
