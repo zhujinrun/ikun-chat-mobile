@@ -17,6 +17,8 @@ import {
   Platform,
   Share,
   Image,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { launchImageLibrary, type Asset } from 'react-native-image-picker'
@@ -98,6 +100,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024
 const DAY_MS = 24 * 60 * 60 * 1000
 const DRAWER_SWIPE_EDGE_WIDTH = 10
 const DRAWER_SWIPE_DISTANCE = 56
+const MESSAGE_AUTO_SCROLL_THRESHOLD = 96
 const IMAGE_PICKER_MAX_EDGE = 1600
 const IMAGE_PICKER_QUALITY = 0.8 as const
 
@@ -241,6 +244,8 @@ const Home = ({ componentId }: Props) => {
   /** 编辑重发：待发送的原消息附件（可逐个移除） */
   const [editAttachments, setEditAttachments] = useState<LX.ChatAttachment[]>([])
   const listRef = useRef<FlatList>(null)
+  const shouldFollowMessageEndRef = useRef(true)
+  const isMessageListDraggingRef = useRef(false)
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) || null,
@@ -398,8 +403,45 @@ const Home = ({ componentId }: Props) => {
   }, [needSetup, componentId])
 
   const scrollToEnd = useCallback(() => {
+    shouldFollowMessageEndRef.current = true
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100)
   }, [])
+
+  const handleMessageListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!isMessageListDraggingRef.current) return
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+      const distanceFromBottom =
+        contentSize.height - layoutMeasurement.height - contentOffset.y
+      shouldFollowMessageEndRef.current = distanceFromBottom <= MESSAGE_AUTO_SCROLL_THRESHOLD
+    },
+    []
+  )
+
+  const handleMessageListScrollBeginDrag = useCallback(() => {
+    isMessageListDraggingRef.current = true
+  }, [])
+
+  const handleMessageListScrollEndDrag = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+      const distanceFromBottom =
+        contentSize.height - layoutMeasurement.height - contentOffset.y
+      shouldFollowMessageEndRef.current = distanceFromBottom <= MESSAGE_AUTO_SCROLL_THRESHOLD
+      isMessageListDraggingRef.current = false
+    },
+    []
+  )
+
+  const handleMessageListMomentumScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+      const distanceFromBottom =
+        contentSize.height - layoutMeasurement.height - contentOffset.y
+      shouldFollowMessageEndRef.current = distanceFromBottom <= MESSAGE_AUTO_SCROLL_THRESHOLD
+    },
+    []
+  )
 
   const markImageBroken = useCallback((uri?: string) => {
     if (!uri) return
@@ -626,6 +668,7 @@ const Home = ({ componentId }: Props) => {
       // 确认发送后才清空输入区，避免取消时丢失草稿
       setInput('')
       setPendingAttachments([])
+      scrollToEnd()
       try {
         await chatAction.send(text, attachments)
         scrollToEnd()
@@ -712,6 +755,7 @@ const Home = ({ componentId }: Props) => {
     if (streaming) return
     if (!ensureReady()) return
     try {
+      scrollToEnd()
       await chatAction.regenerate()
       scrollToEnd()
     } catch (err: any) {
@@ -724,6 +768,7 @@ const Home = ({ componentId }: Props) => {
     if (streaming) return
     if (!ensureReady()) return
     try {
+      scrollToEnd()
       await chatAction.retry()
       scrollToEnd()
     } catch (err: any) {
@@ -825,6 +870,7 @@ const Home = ({ componentId }: Props) => {
     async function doEditResend() {
       setEditTarget(null)
       try {
+        scrollToEnd()
         await chatAction.resendFrom(target.id, text, editAttachments)
         scrollToEnd()
       } catch (err: any) {
@@ -1278,6 +1324,17 @@ const Home = ({ componentId }: Props) => {
                     </Text>
                   ) : null}
                 </View>
+              ) : messageStatus === 'streaming' ? (
+                <Text
+                  style={{
+                    color: textColor,
+                    fontSize: fontSize,
+                    lineHeight: fontSize * 1.5,
+                  }}
+                  selectable
+                >
+                  {item.content}
+                </Text>
               ) : (
                 <MarkdownContent
                   key={`md-${item.id}`}
@@ -1475,9 +1532,16 @@ const Home = ({ componentId }: Props) => {
         renderItem={renderMessage}
         nestedScrollEnabled
         contentContainerStyle={styles.listContent}
+        onScroll={handleMessageListScroll}
+        onScrollBeginDrag={handleMessageListScrollBeginDrag}
+        onScrollEndDrag={handleMessageListScrollEndDrag}
+        onMomentumScrollEnd={handleMessageListMomentumScrollEnd}
+        scrollEventThrottle={16}
         onContentSizeChange={() => {
-          // 流式中减少滚动动画，降低卡顿/闪退风险
-          listRef.current?.scrollToEnd({ animated: !streaming })
+          if (shouldFollowMessageEndRef.current) {
+            // 只在用户本来贴近底部时跟随新内容，避免阅读历史时被拉回最新消息。
+            listRef.current?.scrollToEnd({ animated: !streaming })
+          }
         }}
         ListEmptyComponent={
           <View style={styles.empty}>

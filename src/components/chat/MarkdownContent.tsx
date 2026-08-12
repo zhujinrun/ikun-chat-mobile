@@ -62,6 +62,7 @@ type Block =
 const UL_BULLETS = ['•', '◦', '▪', '▫'] as const
 const INDENT_UNIT = 16
 const MAX_LIST_DEPTH = 6
+const MIN_NARROW_TABLE_COL_WIDTH = 64
 const MIN_TABLE_COL_WIDTH = 112
 const MAX_TABLE_COL_WIDTH = 220
 const MIN_TABLE_WIDTH = 420
@@ -430,9 +431,9 @@ const MarkdownContent = ({ content, fontSize = 16, textColor }: Props) => {
       { cells: pad(b.headers), header: true },
       ...b.rows.map((r) => ({ cells: pad(r), header: false })),
     ]
-    const columnWidths = measureTableColumnWidths(allRows.map((row) => row.cells), cellFont)
+    const columnWidths = measureTableColumnWidths(allRows.map((row) => row.cells), cellFont, colCount)
     const minTableWidth =
-      colCount >= 3 ? Math.max(MIN_TABLE_WIDTH, colCount * MIN_TABLE_COL_WIDTH) : 320
+      colCount >= 3 ? Math.max(MIN_TABLE_WIDTH, colCount * MIN_TABLE_COL_WIDTH) : 0
     const tableWidth = Math.max(
       minTableWidth,
       columnWidths.reduce((sum, width) => sum + width, 0)
@@ -669,16 +670,22 @@ function MarkdownImage({
   )
 }
 
-function measureTableColumnWidths(rows: string[][], cellFont: number): number[] {
+function measureTableColumnWidths(rows: string[][], cellFont: number, colCountHint?: number): number[] {
   const colCount = Math.max(1, ...rows.map((row) => row.length))
+  const narrowTable = (colCountHint || colCount) <= 2
   const widths = Array.from({ length: colCount }, (_, colIndex) => {
     const maxUnits = Math.max(
       4,
       ...rows.map((row) => measureTextUnits(row[colIndex] || ''))
     )
     const width = Math.ceil(maxUnits * cellFont * 0.58 + 28)
-    return Math.min(MAX_TABLE_COL_WIDTH, Math.max(MIN_TABLE_COL_WIDTH, width))
+    return Math.min(
+      MAX_TABLE_COL_WIDTH,
+      Math.max(narrowTable ? MIN_NARROW_TABLE_COL_WIDTH : MIN_TABLE_COL_WIDTH, width)
+    )
   })
+  if (narrowTable) return widths
+
   const total = widths.reduce((sum, width) => sum + width, 0)
   if (total >= MIN_TABLE_WIDTH) return widths
 
@@ -714,6 +721,8 @@ const TABLE_ROW_RE = /^\s*\|.*\|\s*$/
 const TABLE_SEP_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
 /** 整行仅为图片：![alt](url) 可选 title */
 const IMAGE_LINE_RE = /^\s*!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$/
+const AUTO_URL_RE = /^(https?:\/\/[^\s<]+|(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?(?:\/[^\s<]*)?)/i
+const URL_TRAILING_PUNCT_RE = /[)\].,;:!?，。；：！？、]+$/
 
 function parseBlocks(src: string): Block[] {
   const lines = src.replace(/\r\n/g, '\n').split('\n')
@@ -1037,32 +1046,179 @@ function parseAligns(sepLine: string, colCount: number): Align[] {
 // ─── inline parser ──────────────────────────────────────────────
 
 /**
- * 行内优先级：code → image → link → strong → del → em
- * 支持：`code` ![alt](url) [text](url) **bold** ~~del~~ *em*
+ * 行内优先级：code → image/link/autolink → strong → del → em。
+ * 链接用扫描器处理，兼容外层括号、URL 内括号、换行/空白，以及裸域名。
  */
 function parseInlines(text: string): InlineSeg[] {
   const segs: InlineSeg[] = []
-  const re =
-    /(`+)([^`]+?)\1|!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_/g
+  let i = 0
+  let textStart = 0
+
+  const flushText = (end: number) => {
+    if (end <= textStart) return
+    pushFormattedText(segs, text.slice(textStart, end))
+  }
+
+  while (i < text.length) {
+    const code = parseCodeSpan(text, i)
+    if (code) {
+      flushText(i)
+      segs.push({ t: 'code', v: code.value })
+      i = code.end
+      textStart = i
+      continue
+    }
+
+    const markdown = parseMarkdownLink(text, i)
+    if (markdown) {
+      flushText(i)
+      segs.push(markdown.seg)
+      i = markdown.end
+      textStart = i
+      continue
+    }
+
+    const broken = parseMissingOpenBracketLink(text, i)
+    if (broken) {
+      flushText(i)
+      segs.push(broken.seg)
+      i = broken.end
+      textStart = i
+      continue
+    }
+
+    const auto = parseAutoLink(text, i)
+    if (auto) {
+      flushText(i)
+      segs.push(auto.seg)
+      i = auto.end
+      textStart = i
+      continue
+    }
+
+    i++
+  }
+  flushText(text.length)
+  if (!segs.length) segs.push({ t: 'text', v: text })
+  return segs
+}
+
+function pushFormattedText(segs: InlineSeg[], text: string) {
+  if (!text) return
+  const re = /\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_/g
   let last = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
-    if (m.index > last) {
-      segs.push({ t: 'text', v: text.slice(last, m.index) })
-    }
-    if (m[2] != null) segs.push({ t: 'code', v: m[2] })
-    else if (m[3] != null && m[4] != null) segs.push({ t: 'image', alt: m[3], src: m[4].trim() })
-    else if (m[5] != null && m[6] != null) segs.push({ t: 'link', v: m[5], href: m[6] })
-    else if (m[7] != null) segs.push({ t: 'strong', v: m[7] })
-    else if (m[8] != null) segs.push({ t: 'strong', v: m[8] })
-    else if (m[9] != null) segs.push({ t: 'del', v: m[9] })
-    else if (m[10] != null) segs.push({ t: 'em', v: m[10] })
-    else if (m[11] != null) segs.push({ t: 'em', v: m[11] })
+    if (m.index > last) segs.push({ t: 'text', v: text.slice(last, m.index) })
+    if (m[1] != null) segs.push({ t: 'strong', v: m[1] })
+    else if (m[2] != null) segs.push({ t: 'strong', v: m[2] })
+    else if (m[3] != null) segs.push({ t: 'del', v: m[3] })
+    else if (m[4] != null) segs.push({ t: 'em', v: m[4] })
+    else if (m[5] != null) segs.push({ t: 'em', v: m[5] })
     last = m.index + m[0].length
   }
   if (last < text.length) segs.push({ t: 'text', v: text.slice(last) })
-  if (!segs.length) segs.push({ t: 'text', v: text })
-  return segs
+}
+
+function parseCodeSpan(text: string, start: number): { value: string; end: number } | null {
+  if (text[start] !== '`') return null
+  let ticks = 1
+  while (text[start + ticks] === '`') ticks++
+  const marker = '`'.repeat(ticks)
+  const end = text.indexOf(marker, start + ticks)
+  if (end < 0) return null
+  return { value: text.slice(start + ticks, end), end: end + ticks }
+}
+
+function parseMarkdownLink(text: string, start: number): { seg: InlineSeg; end: number } | null {
+  const isImage = text[start] === '!' && text[start + 1] === '['
+  const labelStart = isImage ? start + 2 : text[start] === '[' ? start + 1 : -1
+  if (labelStart < 0) return null
+  const labelEnd = text.indexOf(']', labelStart)
+  if (labelEnd < 0 || text[labelEnd + 1] !== '(') return null
+  const href = readLinkHref(text, labelEnd + 2)
+  if (!href) return null
+  const label = text.slice(labelStart, labelEnd)
+  if (isImage) return { seg: { t: 'image', alt: label, src: href.href }, end: href.end }
+  return { seg: { t: 'link', v: label, href: href.href }, end: href.end }
+}
+
+function parseMissingOpenBracketLink(text: string, start: number): { seg: InlineSeg; end: number } | null {
+  if (!/[A-Za-z0-9]/.test(text[start])) return null
+  let labelEnd = -1
+  const scanEnd = Math.min(text.length - 1, start + 82)
+  for (let i = start + 1; i < scanEnd; i++) {
+    if (text[i] === ']' && text[i + 1] === '(') {
+      labelEnd = i
+      break
+    }
+  }
+  if (labelEnd < 0) return null
+  const label = text.slice(start, labelEnd)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'*+,;=%-]+$/.test(label)) return null
+  const href = readLinkHref(text, labelEnd + 2)
+  if (!href) return null
+  return { seg: { t: 'link', v: label, href: href.href }, end: href.end }
+}
+
+function readLinkHref(text: string, start: number): { href: string; end: number } | null {
+  let i = start
+  let depth = 0
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === '(') depth++
+    else if (ch === ')') {
+      if (depth === 0) {
+        const raw = text.slice(start, i).replace(/\s+/g, '')
+        const href = sanitizeHref(raw)
+        if (!href) return null
+        return { href, end: i + 1 }
+      }
+      depth--
+    }
+    i++
+  }
+  return null
+}
+
+function parseAutoLink(text: string, start: number): { seg: InlineSeg; end: number } | null {
+  if (!/[A-Za-z0-9]/.test(text[start])) return null
+  if (start > 0 && /[A-Za-z0-9._~:/?#\[\]@!$&'*+,;=%-]/.test(text[start - 1])) return null
+  const endHint = findAutoLinkEnd(text, start)
+  if (endHint <= start) return null
+  const candidate = text.slice(start, endHint)
+  const m = candidate.match(AUTO_URL_RE)
+  if (!m) return null
+  let raw = m[0]
+  let trailing = ''
+  const punct = raw.match(URL_TRAILING_PUNCT_RE)?.[0]
+  if (punct) {
+    raw = raw.slice(0, -punct.length)
+    trailing = punct
+  }
+  const href = sanitizeHref(raw)
+  if (!href) return null
+  const end = start + raw.length
+  if (trailing) {
+    // 尾随标点留给下一轮当普通文本渲染。
+  }
+  return { seg: { t: 'link', v: raw.replace(/^https?:\/\//i, ''), href }, end }
+}
+
+function findAutoLinkEnd(text: string, start: number): number {
+  let i = start
+  while (i < text.length && /[A-Za-z0-9._~:/?#\[\]@!$&'*+,;=%-]/.test(text[i])) i++
+  return i
+}
+
+function sanitizeHref(raw: string): string | null {
+  const href = (raw || '').trim()
+  if (!href) return null
+  if (/^https?:\/\//i.test(href)) return href
+  if (/^(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?(?:\/.*)?$/i.test(href)) {
+    return `https://${href}`
+  }
+  return null
 }
 
 export default MarkdownContent
