@@ -116,8 +116,10 @@ const MODEL_CAPABILITY_FILTERS: Array<{ key: ModelCapabilityFilter; label: strin
 
 const MARKDOWN_TABLE_RE =
   /(^|\n)\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*(\n|$)/
+const MARKDOWN_CODE_BLOCK_RE = /(^|\n)\s*(```|~~~)[\s\S]*?(\n\2|$)/
 
 const hasMarkdownTable = (text: string) => MARKDOWN_TABLE_RE.test(text || '')
+const hasMarkdownCodeBlock = (text: string) => MARKDOWN_CODE_BLOCK_RE.test(text || '')
 
 type BuildImageAttachmentResult =
   | { attachment: LX.ChatAttachment }
@@ -1153,14 +1155,15 @@ const Home = ({ componentId }: Props) => {
       const isLast = item.id === lastMessageId
       const isStreamingThis = streaming && item.id === streamingMessageId
       const messageStatus = getMessageStatus(item, isStreamingThis)
-      const messageActions = buildMessageActions(item)
+      const messageActions = streaming ? [] : buildMessageActions(item)
       // 导出会话：挂在最后一条消息下方，不与输入区提示词挤在一起
       const showExport = isLast && !streaming && messages.length > 0
       const showActions =
-        messageStatus === 'streaming' ||
-        messageStatus === 'stopped' ||
-        messageActions.length > 0 ||
-        showExport
+        isStreamingThis || (!streaming && (
+          messageStatus === 'stopped' ||
+          messageActions.length > 0 ||
+          showExport
+        ))
 
       const bubbleBg = isError
         ? colors.error
@@ -1281,7 +1284,8 @@ const Home = ({ componentId }: Props) => {
             : messageStatus === 'failed'
               ? renderStatePill('status-failed', 'warning', '生成失败', 'danger')
               : null
-      const disableMessageLongPress = isAssistant && hasMarkdownTable(item.content)
+      const disableMessageLongPress =
+        isAssistant && (hasMarkdownTable(item.content) || hasMarkdownCodeBlock(item.content))
 
       return (
         <View

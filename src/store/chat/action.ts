@@ -22,6 +22,9 @@ const isAttachmentReadError = (err: unknown): err is AttachmentReadError =>
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const STREAM_DEDUP_MIN_CHARS = 24
+const STREAM_RENDER_INTERVAL_MS = 28
+const STREAM_RENDER_MIN_CHARS = 18
+const STREAM_RENDER_MAX_CHARS = 80
 
 /**
  * 部分 Responses 兼容中转站会把累计文本或最终完整文本当作 delta 再推一次。
@@ -48,6 +51,102 @@ const appendStreamDelta = (current: string, delta: string): string => {
   }
 
   return current + delta
+}
+
+const getStreamRenderStepLength = (text: string): number => {
+  if (text.length <= STREAM_RENDER_MAX_CHARS) return text.length
+  const start = Math.min(STREAM_RENDER_MIN_CHARS, text.length)
+  const end = Math.min(STREAM_RENDER_MAX_CHARS, text.length)
+  for (let i = end; i >= start; i--) {
+    if (/[\n。！？；，、,.!?;:）)\]} ]/.test(text.charAt(i - 1))) return i
+  }
+  return end
+}
+
+const createStreamRenderQueue = (conversationId: string, messageId: string) => {
+  let rendered = ''
+  let target = ''
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let drainResolvers: Array<() => void> = []
+
+  const writeRendered = (content: string) => {
+    rendered = content
+    void conversationAction
+      .updateMessageContent(conversationId, messageId, rendered, false)
+      .catch((err) => console.error('[chat.stream] render update failed', err))
+  }
+
+  const resolveDrains = () => {
+    if (rendered !== target || timer != null) return
+    const resolvers = drainResolvers
+    drainResolvers = []
+    resolvers.forEach((resolve) => resolve())
+  }
+
+  const clearTimer = () => {
+    if (timer == null) return
+    clearTimeout(timer)
+    timer = null
+  }
+
+  const schedule = () => {
+    if (timer != null || rendered === target) {
+      resolveDrains()
+      return
+    }
+    timer = setTimeout(flushStep, STREAM_RENDER_INTERVAL_MS)
+  }
+
+  function flushStep() {
+    timer = null
+    if (rendered === target) {
+      resolveDrains()
+      return
+    }
+
+    if (!target.startsWith(rendered)) {
+      writeRendered(target)
+      resolveDrains()
+      return
+    }
+
+    const pending = target.slice(rendered.length)
+    const stepLength = getStreamRenderStepLength(pending)
+    writeRendered(rendered + pending.slice(0, stepLength))
+    schedule()
+  }
+
+  return {
+    enqueue(next: string) {
+      target = next
+      if (!rendered) {
+        flushStep()
+      } else {
+        schedule()
+      }
+    },
+    drain() {
+      if (rendered === target && timer == null) return Promise.resolve()
+      schedule()
+      return new Promise<void>((resolve) => {
+        drainResolvers.push(resolve)
+      })
+    },
+    async flushNow(next?: string) {
+      if (typeof next === 'string') target = next
+      clearTimer()
+      if (rendered !== target) {
+        rendered = target
+        await conversationAction.updateMessageContent(conversationId, messageId, rendered, false)
+      }
+      resolveDrains()
+    },
+    clear() {
+      clearTimer()
+      target = rendered
+      resolveDrains()
+    },
+  }
 }
 
 /** 取一张图片附件的 dataUrl：优先旧数据里已存的 base64，否则从本地缓存文件实时读取 */
@@ -227,6 +326,7 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
   let hasImageInput = false
   let assistantRemoved = false
   let finalStatus: LX.ChatMessageStatus | undefined
+  const renderQueue = createStreamRenderQueue(conv.id, assistant.id)
   try {
     const station = stationAction.getForConversation(conv)
     const fileHandling =
@@ -249,17 +349,12 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       {
         onDelta: (delta) => {
           full = appendStreamDelta(full, typeof delta === 'string' ? delta : String(delta ?? ''))
-          // 流式过程只更新内存 + 节流 UI，避免每个 token 写盘/狂刷 setState
-          void conversationAction.updateMessageContent(conv.id, assistant.id, full, false)
+          renderQueue.enqueue(full)
         },
         onDone: () => {
           if (!full) {
-            void conversationAction.updateMessageContent(
-              conv.id,
-              assistant.id,
-              '（模型未返回内容）',
-              false
-            )
+            full = '（模型未返回内容）'
+            renderQueue.enqueue(full)
           }
         },
       },
@@ -269,15 +364,19 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
     if (controller.signal.aborted) {
       finalStatus = 'stopped'
       if (!full) {
-        await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）', false)
+        full = '（已停止）'
       }
+      await renderQueue.flushNow(full)
+    } else {
+      await renderQueue.drain()
     }
   } catch (err: any) {
     if (controller.signal.aborted) {
       finalStatus = 'stopped'
       if (!full) {
-        await conversationAction.updateMessageContent(conv.id, assistant.id, '（已停止）', false)
+        full = '（已停止）'
       }
+      await renderQueue.flushNow(full)
     } else {
       const rawMsg = err?.message || '请求失败'
       if (isAttachmentReadError(err)) {
@@ -287,13 +386,9 @@ const streamAssistantReply = async (conv: LX.Conversation, assistant: LX.ChatMes
       failedMessage = msg
       if (full) {
         finalStatus = 'failed'
-        await conversationAction.updateMessageContent(
-          conv.id,
-          assistant.id,
-          `${full}\n\n[错误] ${msg}`,
-          false
-        )
+        await renderQueue.flushNow(`${full}\n\n[错误] ${msg}`)
       } else {
+        renderQueue.clear()
         assistantRemoved = true
         await conversationAction.removeMessage(conv.id, assistant.id)
         try {

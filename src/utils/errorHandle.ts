@@ -1,5 +1,6 @@
 import { setJSExceptionHandler, setNativeExceptionHandler } from 'react-native-exception-handler'
 import {
+  clearLastCrashReport,
   getCrashLogPath,
   getLastCrashReport,
   writeCrashReport,
@@ -84,20 +85,21 @@ setNativeExceptionHandler(
   true
 )
 
-/** 启动时只打日志，不弹窗、不自动清除（方便 adb 多次拉取） */
+/** 启动时只打日志，不弹窗；打印后清除 last 文件，避免旧错误每次启动重复误报。 */
 export const logLastCrashReportIfAny = async () => {
   try {
     const path = await getCrashLogPath()
     const report = await getLastCrashReport()
-    if (path) {
-      rawConsoleWarn('[IkunCrash] log path:', path)
-      rawConsoleWarn(
-        '[IkunCrash] pull: adb pull /sdcard/Android/data/com.ikunshare.chat.mobile/files/last_crash_report.txt'
-      )
-    }
     if (report) {
+      if (path) {
+        rawConsoleWarn('[IkunCrash] log path:', path)
+        rawConsoleWarn(
+          '[IkunCrash] pull: adb pull /sdcard/Android/data/com.ikunshare.chat.mobile/files/last_crash_report.txt'
+        )
+      }
       // 用 raw，避免再次走 reportError
       rawConsoleWarn('[IkunCrash] last report:\n', report)
+      await clearLastCrashReport()
     } else {
       rawConsoleLog('[IkunCrash] no last_crash_report.txt found')
     }
