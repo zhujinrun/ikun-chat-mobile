@@ -4,25 +4,23 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   Switch,
   Alert,
 } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import { useSetting } from '@/store/setting/hook'
 import settingAction from '@/store/setting/action'
-import themeAction from '@/store/theme/action'
 import modelAction from '@/store/model/action'
 import { useModels } from '@/store/model/hook'
 import stationAction from '@/store/station/action'
 import { useStations } from '@/store/station/hook'
 import { useConversations } from '@/store/conversation/hook'
-import { themeList } from '@/theme/themes'
 import { toast } from '@/utils/toast'
 import { normalizeBaseUrl } from '@/core/api'
 import ActionButton from '@/components/common/ActionButton'
 import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
+import AppearanceSettings from './AppearanceSettings'
 import DefaultModelList from './DefaultModelList'
 import SettingOptionGroup from './SettingOptionGroup'
 import SettingSection from './SettingSection'
@@ -30,7 +28,6 @@ import StationPager from './StationPager'
 import {
   ENDPOINT_MODE_OPTIONS,
   FILE_HANDLING_OPTIONS,
-  FONT_SIZE_OPTIONS,
   validateExtraHeaders,
 } from './settingOptions'
 
@@ -449,71 +446,7 @@ const Setting = () => {
       </SettingSection>
 
       <SettingSection title="外观">
-        <Text style={[styles.label, { color: colors.textSecondary }]}>主题</Text>
-        <View style={styles.themeRow}>
-          {themeList.map((t) => (
-            <TouchableOpacity
-              key={t.id}
-              style={[
-                styles.themeChip,
-                {
-                  backgroundColor:
-                    setting['theme.id'] === t.id ? colors.primary : colors.surfaceSecondary,
-                },
-              ]}
-              onPress={() => {
-                settingAction.updateSetting({ 'theme.id': t.id })
-                themeAction.applyTheme(t.id)
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={`切换主题 ${t.name}`}
-              accessibilityState={{ selected: setting['theme.id'] === t.id }}
-            >
-              <Text
-                style={{
-                  color: setting['theme.id'] === t.id ? '#fff' : colors.text,
-                  fontWeight: '600',
-                }}
-              >
-                {t.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 12 }]}>
-          字号
-        </Text>
-        <View style={styles.themeRow}>
-          {FONT_SIZE_OPTIONS.map((option) => (
-            <TouchableOpacity
-              key={option.value}
-              style={[
-                styles.themeChip,
-                {
-                  backgroundColor:
-                    setting['common.fontSize'] === option.value
-                      ? colors.primary
-                      : colors.surfaceSecondary,
-                },
-              ]}
-              onPress={() => {
-                settingAction.updateSetting({ 'common.fontSize': option.value })
-                global.lx.fontSize = option.value
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={`设置字号 ${option.label}`}
-              accessibilityState={{ selected: setting['common.fontSize'] === option.value }}
-            >
-              <Text
-                style={{
-                  color: setting['common.fontSize'] === option.value ? '#fff' : colors.text,
-                }}
-              >
-                {option.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <AppearanceSettings />
       </SettingSection>
 
       <SettingSection title="关于">
@@ -578,12 +511,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 3,
-  },
-  themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  themeChip: {
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
   },
 })
 
