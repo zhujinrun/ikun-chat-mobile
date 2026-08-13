@@ -25,6 +25,7 @@ import { normalizeBaseUrl } from '@/core/api'
 import ActionButton from '@/components/common/ActionButton'
 import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
+import SettingSection from './SettingSection'
 import {
   ENDPOINT_MODE_OPTIONS,
   FILE_HANDLING_OPTIONS,
@@ -277,8 +278,7 @@ const Setting = () => {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={[styles.section, { color: colors.text }]}>中转站</Text>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <SettingSection title="中转站">
         <View style={styles.stationHeaderRow}>
           <Text style={[styles.label, { color: colors.textSecondary, marginBottom: 0 }]}>配置</Text>
           <ActionButton
@@ -668,10 +668,9 @@ const Setting = () => {
             ) : null}
           </View>
         ) : null}
-      </View>
+      </SettingSection>
 
-      <Text style={[styles.section, { color: colors.text }]}>对话</Text>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <SettingSection title="对话">
         <FormField
           label="系统提示词"
           value={systemPrompt}
@@ -720,10 +719,9 @@ const Setting = () => {
           style={styles.saveButton}
           accessibilityLabel="保存对话设置"
         />
-      </View>
+      </SettingSection>
 
-      <Text style={[styles.section, { color: colors.text }]}>外观</Text>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <SettingSection title="外观">
         <Text style={[styles.label, { color: colors.textSecondary }]}>主题</Text>
         <View style={styles.themeRow}>
           {themeList.map((t) => (
@@ -789,15 +787,14 @@ const Setting = () => {
             </TouchableOpacity>
           ))}
         </View>
-      </View>
+      </SettingSection>
 
-      <Text style={[styles.section, { color: colors.text }]}>关于</Text>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <SettingSection title="关于">
         <Text style={{ color: colors.text, lineHeight: 22 }}>
           IKUN Chat Mobile V{appVersion}{'\n'}
           通用 OpenAI 兼容中转站客户端
         </Text>
-      </View>
+      </SettingSection>
     </ScrollView>
   )
 }
@@ -805,13 +802,6 @@ const Setting = () => {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
-  section: { fontSize: 16, fontWeight: '700', marginBottom: 8, marginTop: 8 },
-  card: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
-    marginBottom: 12,
-  },
   label: { fontSize: 13, marginBottom: 6 },
   hint: { fontSize: 12, marginBottom: 8 },
   statusRow: {
