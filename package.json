@@ -7,6 +7,7 @@
     "dev": "react-native run-android --active-arch-only",
     "start": "react-native start",
     "sc": "react-native start --reset-cache",
+    "test": "node scripts/test-runner.js",
     "typecheck": "tsc --noEmit",
     "menu": "adb shell input keyevent 82",
     "pack:android:debug": "cd android && ./gradlew assembleDebug",
