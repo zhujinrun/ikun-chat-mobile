@@ -4,12 +4,9 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Switch,
   Alert,
 } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
-import { useSetting } from '@/store/setting/hook'
-import settingAction from '@/store/setting/action'
 import modelAction from '@/store/model/action'
 import { useModels } from '@/store/model/hook'
 import stationAction from '@/store/station/action'
@@ -21,6 +18,7 @@ import ActionButton from '@/components/common/ActionButton'
 import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
 import AppearanceSettings from './AppearanceSettings'
+import ChatSettings from './ChatSettings'
 import DefaultModelList from './DefaultModelList'
 import SettingOptionGroup from './SettingOptionGroup'
 import SettingSection from './SettingSection'
@@ -35,7 +33,6 @@ const appVersion = require('../../../package.json').version as string
 
 const Setting = () => {
   const theme = useTheme()
-  const setting = useSetting()
   const { stations, defaultId } = useStations()
   const conversations = useConversations()
   const colors = theme.colors
@@ -75,9 +72,6 @@ const Setting = () => {
   const [endpointMode, setEndpointMode] = useState<LX.ApiEndpointMode>('chat_completions')
   const [fileHandling, setFileHandling] = useState<LX.FileHandlingMode>('local_extract')
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
-  const [systemPrompt, setSystemPrompt] = useState(setting['chat.systemPrompt'])
-  const [temperature, setTemperature] = useState(String(setting['chat.temperature']))
-  const [maxTokens, setMaxTokens] = useState(String(setting['chat.maxTokens'] || ''))
   const [testing, setTesting] = useState(false)
 
   useEffect(() => {
@@ -156,17 +150,6 @@ const Setting = () => {
     toast('中转站已保存')
     return true
   }, [apiKey, baseUrl, endpointMode, extraHeaders, fileHandling, selectedStation, stationName])
-
-  const saveChat = useCallback(() => {
-    const temp = parseFloat(temperature)
-    const max = parseInt(maxTokens || '0', 10)
-    settingAction.updateSetting({
-      'chat.systemPrompt': systemPrompt,
-      'chat.temperature': Number.isFinite(temp) ? temp : 0.7,
-      'chat.maxTokens': Number.isFinite(max) ? max : 0,
-    })
-    toast('对话设置已保存')
-  }, [systemPrompt, temperature, maxTokens])
 
   const testAndRefresh = useCallback(async () => {
     if (!selectedStation) {
@@ -395,54 +378,7 @@ const Setting = () => {
       </SettingSection>
 
       <SettingSection title="对话">
-        <FormField
-          label="系统提示词"
-          value={systemPrompt}
-          onChange={setSystemPrompt}
-          multiline
-        />
-        <FormField
-          label="Temperature"
-          value={temperature}
-          onChange={setTemperature}
-          placeholder="0.7"
-          keyboardType="decimal-pad"
-        />
-        <FormField
-          label="Max Tokens（0 表示不限制）"
-          value={maxTokens}
-          onChange={setMaxTokens}
-          placeholder="0"
-          keyboardType="number-pad"
-        />
-        <View style={styles.switchRow}>
-          <View style={styles.switchTextWrap}>
-            <Text style={{ color: colors.text }}>流式输出</Text>
-            <Text style={[styles.switchHint, { color: colors.textSecondary }]}>
-              关闭后将等待完整回复返回，再一次性显示。
-            </Text>
-          </View>
-          <Switch
-            value={setting['chat.stream']}
-            onValueChange={(v) => {
-              settingAction.updateSetting({ 'chat.stream': v })
-              toast(v ? '已开启流式输出' : '已关闭流式输出')
-            }}
-            trackColor={{ false: colors.surfaceSecondary, true: colors.primary }}
-            thumbColor={setting['chat.stream'] ? colors.textInverse : colors.surface}
-            ios_backgroundColor={colors.surfaceSecondary}
-            accessibilityRole="switch"
-            accessibilityLabel="流式输出"
-            accessibilityState={{ checked: setting['chat.stream'] }}
-          />
-        </View>
-        <ActionButton
-          title="保存"
-          compact
-          onPress={saveChat}
-          style={styles.saveButton}
-          accessibilityLabel="保存对话设置"
-        />
+        <ChatSettings />
       </SettingSection>
 
       <SettingSection title="外观">
@@ -496,21 +432,6 @@ const styles = StyleSheet.create({
   saveButton: {
     width: 68,
     alignSelf: 'flex-start',
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 12,
-  },
-  switchTextWrap: {
-    flex: 1,
-  },
-  switchHint: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
   },
 })
 
