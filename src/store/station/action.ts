@@ -151,12 +151,14 @@ export default {
     if (state.stations.length <= 1) {
       throw new Error('至少保留一个中转站')
     }
+    if (state.defaultId === id) {
+      throw new Error('默认中转站不能删除，请先切换默认中转站')
+    }
     const used = conversationState.conversations.some((item) => item.stationId === id)
     if (used) {
       throw new Error('该中转站已有会话使用，暂不能删除')
     }
     state.stations = state.stations.filter((item) => item.id !== id)
-    if (state.defaultId === id) state.defaultId = state.stations[0]?.id || null
     await persist()
     emitUpdated()
   },
