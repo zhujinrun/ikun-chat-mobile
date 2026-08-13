@@ -24,6 +24,7 @@ import ActionButton from '@/components/common/ActionButton'
 import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
 import DefaultModelList from './DefaultModelList'
+import SettingOptionGroup from './SettingOptionGroup'
 import SettingSection from './SettingSection'
 import StationPager from './StationPager'
 import {
@@ -290,88 +291,28 @@ const Setting = () => {
           keyboardType="url"
           helper="支持填主机或带 /v1 的地址，将自动规范化"
         />
-        <Text style={[styles.label, { color: colors.textSecondary }]}>接口模式</Text>
-        <View style={styles.optionGrid}>
-          {ENDPOINT_MODE_OPTIONS.map((option) => {
-            const selected = endpointMode === option.value
-            return (
-              <TouchableOpacity
-                key={option.value}
-                style={[
-                  styles.optionChip,
-                  {
-                    backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
-                    borderColor: selected ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => {
-                  setEndpointMode(option.value)
-                  if (option.value !== 'responses') setFileHandling('local_extract')
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`接口模式 ${option.label}，${option.desc}`}
-                accessibilityState={{ selected }}
-              >
-                <Text style={[styles.optionTitle, { color: selected ? '#fff' : colors.text }]}>
-                  {option.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.optionDesc,
-                    { color: selected ? 'rgba(255,255,255,0.86)' : colors.textSecondary },
-                  ]}
-                >
-                  {option.desc}
-                </Text>
-              </TouchableOpacity>
-            )
-          })}
-        </View>
-        <Text style={[styles.label, { color: colors.textSecondary, marginTop: 10 }]}>
-          文件处理
-        </Text>
-        <View style={styles.optionGrid}>
-          {FILE_HANDLING_OPTIONS.map((option) => {
-            const selected = fileHandling === option.value
-            const direct = option.value === 'direct_file'
-            const disabled = direct && endpointMode !== 'responses'
-            return (
-              <TouchableOpacity
-                key={option.value}
-                style={[
-                  styles.optionChip,
-                  {
-                    backgroundColor: selected ? colors.primary : colors.surfaceSecondary,
-                    borderColor: selected ? colors.primary : colors.border,
-                    opacity: disabled ? 0.55 : 1,
-                  },
-                ]}
-                onPress={() => {
-                  if (disabled) {
-                    toast('原文件直传需要先选择 Responses 接口模式')
-                    return
-                  }
-                  setFileHandling(option.value)
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`文件处理 ${option.label}，${option.desc}`}
-                accessibilityState={{ selected, disabled }}
-              >
-                <Text style={[styles.optionTitle, { color: selected ? '#fff' : colors.text }]}>
-                  {option.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.optionDesc,
-                    { color: selected ? 'rgba(255,255,255,0.86)' : colors.textSecondary },
-                  ]}
-                >
-                  {option.desc}
-                </Text>
-              </TouchableOpacity>
-            )
-          })}
-        </View>
+        <SettingOptionGroup
+          label="接口模式"
+          options={ENDPOINT_MODE_OPTIONS}
+          value={endpointMode}
+          accessibilityLabelPrefix="接口模式"
+          onSelect={(value) => {
+            setEndpointMode(value)
+            if (value !== 'responses') setFileHandling('local_extract')
+          }}
+        />
+        <SettingOptionGroup
+          label="文件处理"
+          options={FILE_HANDLING_OPTIONS}
+          value={fileHandling}
+          accessibilityLabelPrefix="文件处理"
+          labelMarginTop={10}
+          isOptionDisabled={(option) =>
+            option.value === 'direct_file' && endpointMode !== 'responses'
+          }
+          onDisabledPress={() => toast('原文件直传需要先选择 Responses 接口模式')}
+          onSelect={setFileHandling}
+        />
         <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>
           原文件直传会把附件作为 input_file 发送；不支持 Responses 的中转站请使用本地解析。
         </Text>
@@ -637,30 +578,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 3,
-  },
-  optionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
-  optionChip: {
-    flexGrow: 1,
-    flexBasis: '47%',
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  optionTitle: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '800',
-  },
-  optionDesc: {
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
   },
   themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   themeChip: {
