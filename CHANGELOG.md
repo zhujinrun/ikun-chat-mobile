@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.0](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.9...v0.2.0) - 2026-08-13
+
+### 新增
+
+- 新增轻量测试入口，覆盖设置请求头校验与中转站删除限制
+
+### 修复
+
+- 修复默认中转站删除保护只依赖设置页按钮隐藏的问题
+- 修复 React Navigation 迁移后设置页返回与后台恢复稳定性问题
+
+### 优化
+
+- 升级 React Native 至 0.76.9，并迁移到 React Navigation 原生栈
+- 锁定 react-native-screens 版本，规避代码生成兼容问题
+- 优化附件原生文件流释放，降低文件读取后的资源占用风险
+- 拆分设置页结构，降低中转站、对话、外观等配置区块维护成本
+
 ## [0.1.9](https://github.com/zhujinrun/ikun-chat-mobile/compare/v0.1.8...v0.1.9) - 2026-08-12
 
 ### 新增
