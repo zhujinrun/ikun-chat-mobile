@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
-  useWindowDimensions,
 } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import { useSetting } from '@/store/setting/hook'
@@ -26,12 +25,11 @@ import ActionButton from '@/components/common/ActionButton'
 import FormField from '@/components/common/FormField'
 import IconButton from '@/components/common/IconButton'
 import SettingSection from './SettingSection'
+import StationPager from './StationPager'
 import {
   ENDPOINT_MODE_OPTIONS,
   FILE_HANDLING_OPTIONS,
   FONT_SIZE_OPTIONS,
-  endpointModeLabel,
-  fileHandlingLabel,
   validateExtraHeaders,
 } from './settingOptions'
 
@@ -42,10 +40,7 @@ const Setting = () => {
   const setting = useSetting()
   const { stations, defaultId } = useStations()
   const conversations = useConversations()
-  const stationPagerRef = useRef<ScrollView>(null)
-  const { width: windowWidth } = useWindowDimensions()
   const colors = theme.colors
-  const stationCardWidth = Math.max(260, windowWidth - 60)
 
   const [selectedStationId, setSelectedStationId] = useState<string | null>(defaultId)
   const selectedStation = useMemo(
@@ -56,10 +51,6 @@ const Setting = () => {
       null,
     [defaultId, selectedStationId, stations]
   )
-  const selectedStationIndex = useMemo(() => {
-    const index = stations.findIndex((item) => item.id === selectedStation?.id)
-    return index >= 0 ? index : 0
-  }, [selectedStation?.id, stations])
   const { models, loading, error } = useModels(selectedStation?.id)
   const stationUsageCounts = useMemo(() => {
     return conversations.reduce<Record<string, number>>((acc, item) => {
@@ -96,13 +87,6 @@ const Setting = () => {
       setSelectedStationId(selectedStation.id)
     }
   }, [selectedStation, selectedStationId])
-
-  useEffect(() => {
-    stationPagerRef.current?.scrollTo({
-      x: selectedStationIndex * stationCardWidth,
-      animated: true,
-    })
-  }, [selectedStationIndex, stationCardWidth])
 
   useEffect(() => {
     if (!selectedStation) return
@@ -225,21 +209,6 @@ const Setting = () => {
     toast(`默认中转站：${selectedStation.name}`)
   }, [selectedStation])
 
-  const handleStationPageChange = useCallback(
-    (offsetX: number) => {
-      if (!stations.length) return
-      const index = Math.max(
-        0,
-        Math.min(stations.length - 1, Math.round(offsetX / stationCardWidth))
-      )
-      const station = stations[index]
-      if (station && station.id !== selectedStationId) {
-        setSelectedStationId(station.id)
-      }
-    },
-    [selectedStationId, stationCardWidth, stations]
-  )
-
   const deleteStation = useCallback(() => {
     if (!selectedStation) return
     if (stations.length <= 1) {
@@ -289,130 +258,13 @@ const Setting = () => {
             accessibilityLabel="新增中转站"
           />
         </View>
-        <View style={styles.stationPagerFrame}>
-          <ScrollView
-            ref={stationPagerRef}
-            horizontal
-            pagingEnabled
-            decelerationRate="fast"
-            snapToInterval={stationCardWidth}
-            showsHorizontalScrollIndicator={false}
-            nestedScrollEnabled
-            style={{ width: stationCardWidth }}
-            onMomentumScrollEnd={(event) =>
-              handleStationPageChange(event.nativeEvent.contentOffset.x)
-            }
-            onScrollEndDrag={(event) =>
-              handleStationPageChange(event.nativeEvent.contentOffset.x)
-            }
-          >
-            {stations.map((station) => {
-              const selected = station.id === selectedStation?.id
-              const isDefault = station.id === defaultId
-              const usageCount = stationUsageCounts[station.id] || 0
-              return (
-                <TouchableOpacity
-                  key={station.id}
-                  style={[
-                    styles.stationCard,
-                    {
-                      width: stationCardWidth,
-                      backgroundColor: selected ? colors.surfaceSecondary : colors.surface,
-                      borderColor: selected ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setSelectedStationId(station.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${selected ? '当前' : '切换到'}中转站 ${station.name}${isDefault ? '，默认' : ''}，${usageCount} 个会话使用`}
-                  accessibilityState={{ selected }}
-                >
-                  <View style={styles.stationCardHeader}>
-                    <Text
-                      style={[styles.stationCardTitle, { color: colors.text }]}
-                      numberOfLines={1}
-                    >
-                      {station.name}
-                    </Text>
-                    <View style={styles.stationBadgeRow}>
-                      {selected ? (
-                        <Text
-                          style={[
-                            styles.stationBadge,
-                            { backgroundColor: colors.primary, color: '#fff' },
-                          ]}
-                        >
-                          当前
-                        </Text>
-                      ) : null}
-                      {isDefault ? (
-                        <Text
-                          style={[
-                            styles.stationBadge,
-                            { backgroundColor: colors.surface, color: colors.primary },
-                          ]}
-                        >
-                          默认
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                  <Text
-                    style={[styles.stationCardUrl, { color: colors.textSecondary }]}
-                    numberOfLines={1}
-                  >
-                    {station.baseUrl || '未配置 API URL'}
-                  </Text>
-                  <View style={styles.stationCardMetaRow}>
-                    <Text style={[styles.stationCardMeta, { color: colors.textSecondary }]}>
-                      {usageCount} 个会话使用
-                    </Text>
-                    <Text style={[styles.stationCardMeta, { color: colors.textSecondary }]}>
-                      {endpointModeLabel(station.endpointMode)} · {fileHandlingLabel(station.fileHandling)}
-                    </Text>
-                    <Text
-                      style={[styles.stationCardMeta, { color: colors.textSecondary }]}
-                      numberOfLines={1}
-                    >
-                      {station.defaultModel ? `默认模型 ${station.defaultModel}` : '未设置默认模型'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )
-            })}
-          </ScrollView>
-        </View>
-        {stations.length > 1 ? (
-          <View style={styles.stationDots}>
-            {stations.map((station, index) => {
-              const selected = station.id === selectedStation?.id
-              return (
-                <TouchableOpacity
-                  key={station.id}
-                  style={[
-                    styles.stationDot,
-                    {
-                      width: selected ? 16 : 6,
-                      backgroundColor: selected ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => {
-                    setSelectedStationId(station.id)
-                    stationPagerRef.current?.scrollTo({
-                      x: index * stationCardWidth,
-                      animated: true,
-                    })
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`切换到第 ${index + 1} 个中转站 ${station.name}`}
-                  accessibilityState={{ selected }}
-                />
-              )
-            })}
-          </View>
-        ) : null}
-        <Text style={[styles.stationRuleHint, { color: colors.textSecondary }]}>
-          默认中转站只影响新建会话，已有会话会继续使用创建时绑定的中转站。
-        </Text>
+        <StationPager
+          stations={stations}
+          defaultId={defaultId}
+          selectedStationId={selectedStation?.id}
+          usageCounts={stationUsageCounts}
+          onSelect={setSelectedStationId}
+        />
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, { backgroundColor: connectionStatus.tone }]} />
           <View style={styles.statusTextWrap}>
@@ -832,76 +684,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
-  },
-  stationPagerFrame: {
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  stationCard: {
-    minHeight: 116,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  stationCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 8,
-  },
-  stationCardTitle: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  stationBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    gap: 5,
-  },
-  stationBadge: {
-    overflow: 'hidden',
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: '800',
-  },
-  stationCardUrl: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 12,
-  },
-  stationCardMetaRow: {
-    gap: 4,
-  },
-  stationCardMeta: {
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '700',
-  },
-  stationDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 2,
-    marginBottom: 10,
-  },
-  stationDot: {
-    height: 6,
-    borderRadius: 999,
-  },
-  stationRuleHint: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: 12,
   },
   saveButton: {
     width: 68,
